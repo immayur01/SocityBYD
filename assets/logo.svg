@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <style>
+    .glass-base { fill: #0F172A; fill-opacity: 0.55; }
+    .glass-surface { fill: url(#lightGlassSurface); }
+    .glass-gloss { fill: url(#lightTopGloss); }
+    .glass-rim { stroke: url(#lightGlassRim); }
+    .orb-primary { fill: url(#lightAmberGlow); }
+    .orb-secondary { fill: url(#lightSkyGlow); }
+    .logo-gold { display: inline; }
+    .logo-mono { display: none; color: #FFFFFF; }
+    @media (prefers-color-scheme: dark) {
+      .glass-base { fill: #090D16; fill-opacity: 0.62; }
+      .glass-surface { fill: url(#darkGlassSurface); }
+      .glass-gloss { fill: url(#darkTopGloss); }
+      .glass-rim { stroke: url(#darkGlassRim); }
+      .orb-primary { fill: url(#darkSilverGlow); }
+      .orb-secondary { fill: url(#darkBlueGlow); }
+      .logo-gold { display: none; }
+      .logo-mono { display: inline; color: #FFFFFF; }
+    }
+  </style>
+  <defs>
+    <radialGradient id="lightAmberGlow" cx="30%" cy="25%" r="55%">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lightSkyGlow" cx="75%" cy="80%" r="55%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lightGlassSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#0F172A" stop-opacity="0.32"/>
+    </linearGradient>
+    <linearGradient id="lightTopGloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.38"/>
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lightGlassRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.75"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FDE68A" stop-opacity="0.45"/>
+    </linearGradient>
+    <radialGradient id="darkSilverGlow" cx="28%" cy="22%" r="55%">
+      <stop offset="0%" stop-color="#94A3B8" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#94A3B8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="darkBlueGlow" cx="76%" cy="80%" r="55%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="darkGlassSurface" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.11"/>
+      <stop offset="100%" stop-color="#090D16" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="darkTopGloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="darkGlassRim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.80"/>
+      <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#CBD5E1" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="goldFloat" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A"/>
+      <stop offset="50%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#B45309"/>
+    </linearGradient>
+    <filter id="orbBlur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="32"/>
+    </filter>
+    <filter id="logoShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+    <clipPath id="squircleClip">
+      <rect x="24" y="24" width="464" height="464" rx="108"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#squircleClip)">
+    <rect class="glass-base" x="24" y="24" width="464" height="464"/>
+    <g filter="url(#orbBlur)">
+      <circle class="orb-primary" cx="150" cy="140" r="190"/>
+      <circle class="orb-secondary" cx="370" cy="390" r="200"/>
+    </g>
+    <rect class="glass-surface" x="24" y="24" width="464" height="464"/>
+    <rect class="glass-gloss" x="24" y="24" width="464" height="232"/>
+  </g>
+  <rect class="glass-rim" x="24" y="24" width="464" height="464" rx="108" fill="none" stroke-width="2.5"/>
+  <rect x="26.5" y="26.5" width="459" height="459" rx="105.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="1"/>
+  <g class="logo-gold" filter="url(#logoShadow)" transform="translate(0, 6)">
+    <path d="M 206 168 L 206 136 L 256 98 L 306 136 L 306 168" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linejoin="miter"/>
+    <polygon points="256,122 267,131 267,144 245,144 245,131" fill="url(#goldFloat)"/>
+    <path d="M 218 176 Q 256 144 294 176" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linecap="round"/>
+    <path d="M 256 176 C 256 176, 248 194, 248 201 A 8 8 0 0 0 264 201 C 264 194, 256 176, 256 176 Z" fill="#DC2626"/>
+    <path d="M 216 196 C 188 182, 162 180, 146 182 C 154 214, 154 248, 174 264 C 194 278, 212 262, 206 238 L 206 218" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M 296 196 C 324 182, 350 180, 366 182 C 358 214, 358 248, 338 264 C 318 278, 300 262, 306 238 L 306 218" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M 218 218 Q 228 212 236 220 Q 227 226 218 218 Z" fill="url(#goldFloat)"/>
+    <path d="M 294 218 Q 284 212 276 220 Q 285 226 294 218 Z" fill="url(#goldFloat)"/>
+    <path d="M 224 262 L 214 274" fill="none" stroke="url(#goldFloat)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M 288 262 L 298 274" fill="none" stroke="url(#goldFloat)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M 216 196 C 242 212, 246 244, 246 276 C 246 318, 276 346, 314 334 C 304 354, 268 360, 248 338 C 232 320, 232 288, 232 262" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 296 196 C 270 212, 266 244, 266 274 C 266 298, 282 318, 304 316" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linecap="round"/>
+    <path d="M 204 294 C 170 280, 146 306, 154 338 C 162 370, 204 388, 240 390" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linecap="round"/>
+    <path d="M 308 294 C 342 280, 366 306, 358 338 C 350 370, 304 386, 276 382 C 260 380, 250 390, 248 402 C 268 402, 284 392, 296 382" fill="none" stroke="url(#goldFloat)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g class="logo-mono" filter="url(#logoShadow)" transform="translate(0, 6)" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 206 168 L 206 136 L 256 98 L 306 136 L 306 168" stroke-linejoin="miter"/>
+    <polygon points="256,122 267,131 267,144 245,144 245,131" fill="currentColor" stroke="none"/>
+    <path d="M 218 176 Q 256 144 294 176"/>
+    <path d="M 256 176 C 256 176, 248 194, 248 201 A 8 8 0 0 0 264 201 C 264 194, 256 176, 256 176 Z" fill="currentColor" stroke="none"/>
+    <path d="M 216 196 C 188 182, 162 180, 146 182 C 154 214, 154 248, 174 264 C 194 278, 212 262, 206 238 L 206 218"/>
+    <path d="M 296 196 C 324 182, 350 180, 366 182 C 358 214, 358 248, 338 264 C 318 278, 300 262, 306 238 L 306 218"/>
+    <path d="M 218 218 Q 228 212 236 220 Q 227 226 218 218 Z" fill="currentColor" stroke="none"/>
+    <path d="M 294 218 Q 284 212 276 220 Q 285 226 294 218 Z" fill="currentColor" stroke="none"/>
+    <path d="M 224 262 L 214 274" stroke-width="10"/>
+    <path d="M 288 262 L 298 274" stroke-width="10"/>
+    <path d="M 216 196 C 242 212, 246 244, 246 276 C 246 318, 276 346, 314 334 C 304 354, 268 360, 248 338 C 232 320, 232 288, 232 262"/>
+    <path d="M 296 196 C 270 212, 266 244, 266 274 C 266 298, 282 318, 304 316"/>
+    <path d="M 204 294 C 170 280, 146 306, 154 338 C 162 370, 204 388, 240 390"/>
+    <path d="M 308 294 C 342 280, 366 306, 358 338 C 350 370, 304 386, 276 382 C 260 380, 250 390, 248 402 C 268 402, 284 392, 296 382"/>
+  </g>
+</svg>

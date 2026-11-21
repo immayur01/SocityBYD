@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Ashtavinayak Empire",
+    "slug": "ashtavinayak-empire",
+    "version": "1.0.0",
+    "newArchEnabled": true,
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "ashtavinayak",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#080813"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ashtavinayak.empire"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#080813"
+      },
+      "backgroundColor": "#0B0E14",
+      "package": "com.ashtavinayak.empire",
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "node_modules/@expo-google-fonts/cinzel/Cinzel_700Bold.ttf",
+            "node_modules/@expo-google-fonts/cinzel/Cinzel_800ExtraBold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/PlusJakartaSans_400Regular.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/PlusJakartaSans_600SemiBold.ttf",
+            "node_modules/@expo-google-fonts/plus-jakarta-sans/PlusJakartaSans_700Bold.ttf"
+          ]
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "476d43dd-7b6d-45a1-bb27-bb6664819550"
+      }
+    }
+  }
+}
