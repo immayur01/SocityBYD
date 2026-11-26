@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   Pressable,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   Modal,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
   LayoutAnimation,
   UIManager,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -51,7 +51,11 @@ import {
   FileText,
   Inbox,
 } from 'lucide-react-native';
+import { UnreadBadge, formatBadgeCount } from '@/components/UnreadBadge';
 import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
+import { chatService } from '@/services/chat';
+import { isSupabaseConfigured } from '@/services/supabase';
 
 // Enable LayoutAnimation for smooth WhatsApp-style thread reordering on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -172,7 +176,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822011101',
     dob: '1978-04-14',
     online: true,
-    avatarColor: '#0D9488',
+    avatarColor: '#18181B',
     initials: 'RS',
   },
   {
@@ -184,7 +188,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822022304',
     dob: '1984-09-22',
     online: true,
-    avatarColor: '#D97706',
+    avatarColor: '#18181B',
     initials: 'SD',
   },
   {
@@ -196,7 +200,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822033201',
     dob: '1991-11-05',
     online: false,
-    avatarColor: '#4F46E5',
+    avatarColor: '#18181B',
     initials: 'PK',
   },
   {
@@ -208,7 +212,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822044202',
     dob: '1987-02-19',
     online: true,
-    avatarColor: '#E11D48',
+    avatarColor: '#18181B',
     initials: 'VJ',
   },
   {
@@ -220,7 +224,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822055401',
     dob: '1993-07-30',
     online: false,
-    avatarColor: '#9333EA',
+    avatarColor: '#18181B',
     initials: 'NP',
   },
   {
@@ -232,7 +236,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822066104',
     dob: '1981-12-11',
     online: true,
-    avatarColor: '#0891B2',
+    avatarColor: '#18181B',
     initials: 'SG',
   },
   {
@@ -244,7 +248,7 @@ const SOCIETY_MEMBERS_DB: ResidentMember[] = [
     phone: '9822077302',
     dob: '1995-06-18',
     online: true,
-    avatarColor: '#059669',
+    avatarColor: '#18181B',
     initials: 'AD',
   },
 ];
@@ -259,8 +263,8 @@ const createWingGroupData = (buildingName: string, userFlat: string): ChannelGro
   lastTime: '10:24 AM',
   lastMessageAt: Date.now() - 1000 * 60 * 5,
   iconType: 'wing',
-  accentBg: 'rgba(16, 185, 129, 0.14)',
-  accentColor: '#10B981',
+  accentBg: '#18181B',
+  accentColor: '#E4E4E7',
   messages: [
     {
       id: `${buildingName}-w1`,
@@ -294,8 +298,8 @@ const INITIAL_UNIVERSAL_CHANNELS: ChannelGroup[] = [
     unread: 0,
     lastTime: '10:10 PM',
     iconType: 'building',
-    accentBg: 'rgba(16, 185, 129, 0.15)',
-    accentColor: '#10B981',
+    accentBg: '#18181B',
+    accentColor: '#E4E4E7',
     messages: [
       {
         id: 'g-1',
@@ -338,8 +342,8 @@ const INITIAL_UNIVERSAL_CHANNELS: ChannelGroup[] = [
     unread: 1,
     lastTime: '10:15 AM',
     iconType: 'megaphone',
-    accentBg: 'rgba(245, 158, 11, 0.15)',
-    accentColor: '#F59E0B',
+    accentBg: '#18181B',
+    accentColor: '#E4E4E7',
     messages: [
       {
         id: 'ann-1',
@@ -361,8 +365,8 @@ const INITIAL_UNIVERSAL_CHANNELS: ChannelGroup[] = [
     unread: 2,
     lastTime: '7:45 PM',
     iconType: 'food',
-    accentBg: 'rgba(249, 115, 22, 0.15)',
-    accentColor: '#F97316',
+    accentBg: '#18181B',
+    accentColor: '#E4E4E7',
     messages: [
       {
         id: 'f-1',
@@ -384,8 +388,8 @@ const INITIAL_UNIVERSAL_CHANNELS: ChannelGroup[] = [
     unread: 0,
     lastTime: 'Yesterday',
     iconType: 'sparkles',
-    accentBg: 'rgba(236, 72, 153, 0.15)',
-    accentColor: '#EC4899',
+    accentBg: '#18181B',
+    accentColor: '#E4E4E7',
     messages: [
       {
         id: 'c-1',
@@ -516,13 +520,14 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { isDark, tokens } = useTheme();
+  const { user } = useAuth();
 
-  // Resident profile (auto-assigns 16-flat building group from profile data)
-  const [userProfile] = useState({
-    name: 'Mayur',
-    building: 'Chintamani',
-    flat: '303',
-  });
+  // Resident profile (auto-assigns building group from user profile or default)
+  const userProfile = {
+    name: user?.full_name || 'Mayur',
+    building: (user?.wing?.replace('Wing ', '') ? `Wing ${user.wing.replace('Wing ', '')}` : 'Chintamani'),
+    flat: user?.flat_number || '303',
+  };
 
   // Navigation & overlays
   const [activeTab, setActiveTab] = useState<'community' | 'direct'>('community');
@@ -556,6 +561,10 @@ export default function ChatScreen() {
 
   const unreadNotifCount = notifications.filter((n) => n.unread).length;
   const unreadDmCount = dms.reduce((sum, d) => sum + d.unread, 0) + dmRequests.length;
+  const unreadCommunityCount =
+    (wingGroup.unread > 0 ? 1 : 0) +
+    communities.filter((c) => ((c as any).isMuted ? false : c.unread > 0)).length;
+  const unreadDmTabCount = dms.filter((d) => d.unread > 0).length + dmRequests.length;
 
   const activeCommunity =
     activeCommunityId === wingGroup.id
@@ -564,17 +573,17 @@ export default function ChatScreen() {
   const activeDm = dms.find((d) => d.id === activeDmId);
 
   const colors = {
-    bg: isDark ? '#0B0E14' : '#F3F5F9',
-    card: isDark ? '#151A24' : '#FFFFFF',
-    border: isDark ? '#232B3B' : '#E2E8F0',
-    text: isDark ? '#F1F5F9' : '#0F172A',
-    subText: isDark ? '#94A3B8' : '#64748B',
-    activeSquircleBg: isDark ? '#064E3B' : '#ECFDF5',
-    activeSquircleBorder: '#10B981',
-    activeSquircleText: isDark ? '#6EE7B7' : '#047857',
-    incomingBubble: isDark ? '#1A212E' : '#FFFFFF',
-    outgoingBubble: isDark ? '#064E3B' : '#047857',
-    inputBg: isDark ? '#161B26' : '#FFFFFF',
+    bg: isDark ? '#000000' : '#F5F5F7',
+    card: isDark ? '#111113' : '#FFFFFF',
+    border: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)',
+    text: isDark ? '#F5F5F5' : '#111113',
+    subText: isDark ? '#A1A1AA' : '#64748B',
+    activeSquircleBg: isDark ? '#F5F5F5' : '#09090B',
+    activeSquircleBorder: isDark ? '#F5F5F5' : '#09090B',
+    activeSquircleText: isDark ? '#000000' : '#FFFFFF',
+    incomingBubble: isDark ? '#121214' : '#FFFFFF',
+    outgoingBubble: isDark ? '#1C1C1E' : '#09090B',
+    inputBg: isDark ? '#18181B' : '#F4F4F5',
   };
 
   const activeTimersRef = useRef<NodeJS.Timeout[]>([]);
@@ -599,6 +608,129 @@ export default function ChatScreen() {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 80);
   }, [activeCommunityId, activeDmId, wingGroup.messages.length, communities, dms]);
+
+  // Live Supabase Realtime subscription for instant message & reaction updates
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    // 1. Initial hydration from Supabase
+    chatService.fetchMessages({ roomType: 'community', roomId: 'community', limit: 30 }).then(({ messages: liveMsgs }) => {
+      if (liveMsgs.length > 0) {
+        setCommunities((prev) =>
+          prev.map((c) => {
+            if (c.id === 'comm-general' || c.id === 'general' || c.id === 'community') {
+              const mapped = liveMsgs.map((raw) => ({
+                id: raw.id,
+                senderId: raw.sender_id === (user?.id || 'usr-current-1') ? 'me' : raw.sender_id,
+                senderName: raw.sender?.full_name || 'Resident',
+                flat: raw.sender ? `${raw.sender.wing} ${raw.sender.flat_number}` : '',
+                text: raw.text,
+                time: new Date(raw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                status: (raw.is_read ? 'read' : 'delivered') as 'read' | 'delivered',
+                reactions: Object.fromEntries(
+                  Object.entries(raw.reactions || {}).map(([emoji, userIds]) => [emoji, (userIds as string[]).length])
+                ),
+                userReacted: Object.entries(raw.reactions || {})
+                  .filter(([_, userIds]) => (userIds as string[]).includes(user?.id || 'usr-current-1'))
+                  .map(([emoji]) => emoji),
+                attachment: raw.media_url
+                  ? { type: (raw.media_url.endsWith('.pdf') ? 'file' : 'image') as 'file' | 'image', uri: raw.media_url, name: 'attachment' }
+                  : undefined,
+              }));
+              return { ...c, messages: mapped };
+            }
+            return c;
+          })
+        );
+      }
+    });
+
+    // 2. Realtime WebSocket subscription
+    const unsubscribe = chatService.subscribeToMessages((event) => {
+      const raw = event.new;
+      if (!raw) return;
+
+      const timeFormatted = new Date(raw.created_at || Date.now()).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const normalizedMsg: ChatMessage = {
+        id: raw.id,
+        senderId: raw.sender_id === (user?.id || 'usr-current-1') ? 'me' : raw.sender_id,
+        senderName: raw.sender?.full_name || 'Resident',
+        flat: raw.sender ? `${raw.sender.wing} ${raw.sender.flat_number}` : '',
+        text: raw.text,
+        time: timeFormatted,
+        status: (raw.is_read ? 'read' : 'delivered') as 'read' | 'delivered',
+        reactions: Object.fromEntries(
+          Object.entries(raw.reactions || {}).map(([emoji, userIds]) => [emoji, (userIds as string[]).length])
+        ),
+        userReacted: Object.entries(raw.reactions || {})
+          .filter(([_, userIds]) => (userIds as string[]).includes(user?.id || 'usr-current-1'))
+          .map(([emoji]) => emoji),
+        attachment: raw.media_url
+          ? {
+              type: (raw.media_url.endsWith('.pdf') ? 'file' : 'image') as 'file' | 'image',
+              uri: raw.media_url,
+              name: 'attachment',
+            }
+          : undefined,
+      };
+
+      if (raw.room_type === 'community') {
+        setCommunities((prev) =>
+          prev.map((c) => {
+            const matchesRoom =
+              c.id === raw.room_id ||
+              (c.id === 'comm-general' && (raw.room_id === 'community' || raw.room_id === 'comm-general')) ||
+              (!c.id && raw.room_id === 'community') ||
+              c.id === 'general';
+            if (matchesRoom) {
+              if (c.messages.some((m) => m.id === normalizedMsg.id)) {
+                return {
+                  ...c,
+                  messages: c.messages.map((m) => (m.id === normalizedMsg.id ? normalizedMsg : m)),
+                };
+              }
+              return {
+                ...c,
+                lastTime: timeFormatted,
+                messages: [...c.messages, normalizedMsg],
+              };
+            }
+            return c;
+          })
+        );
+      } else if (raw.room_type === 'dm') {
+        setDms((prev) => {
+          const updated = prev.map((d) => {
+            const isTarget = d.id === raw.room_id || d.resident.id === raw.sender_id || d.resident.id === raw.recipient_id;
+            if (isTarget) {
+              if (d.messages.some((m) => m.id === normalizedMsg.id)) {
+                return {
+                  ...d,
+                  messages: d.messages.map((m) => (m.id === normalizedMsg.id ? normalizedMsg : m)),
+                };
+              }
+              return {
+                ...d,
+                lastTime: timeFormatted,
+                lastMessageAt: Date.now(),
+                messages: [...d.messages, normalizedMsg],
+              };
+            }
+            return d;
+          });
+          return sortByMostRecent(updated);
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user?.id, wingGroup.id]);
 
   // Back button navigation (Used by both UI top-nav and Android Hardware Back Button)
   const handleBack = () => {
@@ -861,6 +993,9 @@ export default function ChatScreen() {
       );
     }
     setActiveReactionMsgId(null);
+    if (isSupabaseConfigured) {
+      chatService.toggleReaction(msgId, emoji, user?.id).catch((e) => console.warn('[chat] reaction error:', e));
+    }
   };
 
   const handleDmReaction = (dmId: string, msgId: string, emoji: string) => {
@@ -875,6 +1010,9 @@ export default function ChatScreen() {
       )
     );
     setActiveReactionMsgId(null);
+    if (isSupabaseConfigured) {
+      chatService.toggleReaction(msgId, emoji, user?.id).catch((e) => console.warn('[chat] dm reaction error:', e));
+    }
   };
 
   const handleSendMessage = () => {
@@ -925,6 +1063,17 @@ export default function ChatScreen() {
       // WhatsApp status tick progression: delivered (1s), read (2.5s)
       safeSetTimeout(() => updateMessageStatus(newMsgId, 'delivered'), 1000);
       safeSetTimeout(() => updateMessageStatus(newMsgId, 'read'), 2500);
+
+      if (isSupabaseConfigured) {
+        chatService.sendMessage({
+          roomType: 'community',
+          roomId: activeCommunity.id === 'comm-general' ? 'community' : activeCommunity.id,
+          text: trimmed,
+          mediaUri: attachmentToSend?.uri,
+          mimeType: attachmentToSend?.mimeType,
+          fileName: attachmentToSend?.name,
+        }).catch((e) => console.warn('[chat] send community error:', e));
+      }
     } else if (activeTab === 'direct' && activeDm && activeDm.requestState === 'accepted') {
       const newMsg: ChatMessage = {
         id: newMsgId,
@@ -959,42 +1108,54 @@ export default function ChatScreen() {
       safeSetTimeout(() => updateMessageStatus(newMsgId, 'delivered'), 1000);
       safeSetTimeout(() => updateMessageStatus(newMsgId, 'read'), 2500);
 
-      // Simulate a realistic incoming neighbor reply that bumps thread & updates lastTime / preview
-      const targetDmId = activeDm.id;
-      const targetResident = activeDm.resident;
-      safeSetTimeout(() => {
-        const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const neighborReplies = [
-          'Thank you Aarav ji! Really appreciate your quick response 🙏',
-          'Noted! Will coordinate with Shivaji at Gate #1 👍',
-          'Got it! Thanks for letting me know 😊',
-          'Perfect! See you at the society clubhouse!',
-        ];
-        const chosenReply = neighborReplies[Math.floor(Math.random() * neighborReplies.length)];
-        const incomingMsg: ChatMessage = {
-          id: `dm-reply-${Date.now()}`,
-          senderId: targetResident.id,
-          text: chosenReply,
-          time: replyTime,
-          reactions: {},
-          userReacted: [],
-        };
+      if (isSupabaseConfigured) {
+        chatService.sendMessage({
+          roomType: 'dm',
+          roomId: activeDm.id,
+          recipientId: activeDm.resident.id,
+          text: trimmed,
+          mediaUri: attachmentToSend?.uri,
+          mimeType: attachmentToSend?.mimeType,
+          fileName: attachmentToSend?.name,
+        }).catch((e) => console.warn('[chat] send dm error:', e));
+      } else {
+        // Simulate a realistic incoming neighbor reply ONLY in offline / demo mode
+        const targetDmId = activeDm.id;
+        const targetResident = activeDm.resident;
+        safeSetTimeout(() => {
+          const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const neighborReplies = [
+            'Thank you Mayur ji! Really appreciate your quick response 🙏',
+            'Noted! Will coordinate with Shivaji at Gate #1 👍',
+            'Got it! Thanks for letting me know 😊',
+            'Perfect! See you at the society clubhouse!',
+          ];
+          const chosenReply = neighborReplies[Math.floor(Math.random() * neighborReplies.length)];
+          const incomingMsg: ChatMessage = {
+            id: `dm-reply-${Date.now()}`,
+            senderId: targetResident.id,
+            text: chosenReply,
+            time: replyTime,
+            reactions: {},
+            userReacted: [],
+          };
 
-        animateLayoutTransition();
-        setDms((prev) => {
-          const updated = prev.map((d) =>
-            d.id === targetDmId
-              ? {
-                  ...d,
-                  lastTime: replyTime,
-                  lastMessageAt: Date.now(),
-                  messages: [...d.messages, incomingMsg],
-                }
-              : d
-          );
-          return sortByMostRecent(updated);
-        });
-      }, 4000);
+          animateLayoutTransition();
+          setDms((prev) => {
+            const updated = prev.map((d) =>
+              d.id === targetDmId
+                ? {
+                    ...d,
+                    lastTime: replyTime,
+                    lastMessageAt: Date.now(),
+                    messages: [...d.messages, incomingMsg],
+                  }
+                : d
+            );
+            return sortByMostRecent(updated);
+          });
+        }, 4000);
+      }
     }
   };
 
@@ -1121,9 +1282,10 @@ export default function ChatScreen() {
           <Text style={[styles.tabLabel, { color: activeTab === 'community' && !showNotifications ? colors.activeSquircleText : colors.text }]}>
             Community
           </Text>
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText}>148</Text>
-          </View>
+          <UnreadBadge
+            count={unreadCommunityCount}
+            variant={activeTab === 'community' && !showNotifications ? 'activeTab' : 'inactiveTab'}
+          />
         </TouchableOpacity>
 
         {/* 3. Direct Messages Squircle */}
@@ -1145,11 +1307,10 @@ export default function ChatScreen() {
           <Text style={[styles.tabLabel, { color: activeTab === 'direct' && !showNotifications ? colors.activeSquircleText : colors.text }]}>
             Direct
           </Text>
-          {unreadDmCount > 0 && (
-            <View style={styles.greenBadge}>
-              <Text style={styles.badgeWhiteText}>{unreadDmCount}</Text>
-            </View>
-          )}
+          <UnreadBadge
+            count={unreadDmTabCount}
+            variant={activeTab === 'direct' && !showNotifications ? 'activeTab' : 'inactiveTab'}
+          />
         </TouchableOpacity>
 
         {/* 4. Notification Bell Squircle */}
@@ -1167,7 +1328,7 @@ export default function ChatScreen() {
           <Bell size={19} color={showNotifications ? colors.activeSquircleText : colors.text} strokeWidth={2.2} />
           {unreadNotifCount > 0 && (
             <View style={styles.redNotifDot}>
-              <Text style={styles.badgeWhiteText}>{unreadNotifCount}</Text>
+              <Text style={styles.badgeWhiteText}>{formatBadgeCount(unreadNotifCount)}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -1242,17 +1403,22 @@ export default function ChatScreen() {
 
             <TouchableOpacity
               onPress={() => { setActiveCommunityId(wingGroup.id); setWingGroup((prev) => ({ ...prev, unread: 0 })); }}
-              style={[styles.cardBox, { backgroundColor: isDark ? '#0D2622' : '#ECFDF5', borderColor: isDark ? '#0F766E' : '#A7F3D0', marginBottom: 16 }]}
+              style={[styles.cardBox, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 16 }]}
             >
-              <View style={styles.wingIconSquircle}><Home size={22} color="#FFFFFF" /></View>
+              <View style={[styles.wingIconSquircle, { backgroundColor: colors.inputBg, borderColor: colors.border, borderWidth: 1 }]}><Home size={20} color={colors.text} strokeWidth={1.5} /></View>
               <View style={{ flex: 1 }}>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.cardTitle, { color: colors.text }]}>{wingGroup.name}</Text>
-                  <Text style={{ fontSize: 10.5, color: '#10B981', fontWeight: '700' }}>{wingGroup.lastTime}</Text>
+                  <Text style={{ fontSize: 10.5, color: colors.subText, fontWeight: '600' }}>{wingGroup.lastTime}</Text>
                 </View>
-                <Text style={{ fontSize: 12, color: colors.subText, marginTop: 4 }} numberOfLines={1}>
-                  {wingGroup.messages[wingGroup.messages.length - 1]?.text}
-                </Text>
+                <View style={[styles.rowBetween, { marginTop: 3 }]}>
+                  <Text style={{ fontSize: 12, color: colors.subText, flex: 1, marginRight: 8 }} numberOfLines={1}>
+                    {wingGroup.messages[wingGroup.messages.length - 1]?.text}
+                  </Text>
+                  {wingGroup.unread > 0 && (
+                    <UnreadBadge count={wingGroup.unread} />
+                  )}
+                </View>
               </View>
             </TouchableOpacity>
 
@@ -1277,7 +1443,7 @@ export default function ChatScreen() {
                   <View style={[styles.rowBetween, { marginTop: 3 }]}>
                     <Text style={{ fontSize: 12, color: colors.subText, flex: 1, marginRight: 8 }} numberOfLines={1}>{comm.subtitle}</Text>
                     {comm.unread > 0 ? (
-                      <View style={styles.greenBadge}><Text style={styles.badgeWhiteText}>{comm.unread}</Text></View>
+                      <UnreadBadge count={comm.unread} />
                     ) : (
                       <ChevronRight size={16} color={colors.subText} />
                     )}
@@ -1323,8 +1489,8 @@ export default function ChatScreen() {
                     >
                       {!isMe && (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#10B981' }}>{msg.senderName}</Text>
-                          <View style={styles.countPill}><Text style={styles.countPillText}>{msg.flat}</Text></View>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#E4E4E7' : '#111113' }}>{msg.senderName}</Text>
+                          <View style={[styles.countPill, { backgroundColor: colors.inputBg }]}><Text style={[styles.countPillText, { color: colors.subText }]}>{msg.flat}</Text></View>
                         </View>
                       )}
                       {msg.attachment && renderAttachmentInBubble(msg.attachment, isMe)}
@@ -1337,14 +1503,14 @@ export default function ChatScreen() {
                             <TouchableOpacity
                               key={emoji}
                               onPress={() => handleCommunityReaction(activeCommunity.id, msg.id, emoji)}
-                              style={[styles.reactionPill, msg.userReacted.includes(emoji) && { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.16)' }]}
+                              style={[styles.reactionPill, msg.userReacted.includes(emoji) && { borderColor: colors.border, backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' }]}
                             >
                               <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text }}>{emoji} {count}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <Text style={{ fontSize: 10, color: isMe ? '#D1FAE5' : colors.subText }}>{msg.time}</Text>
+                          <Text style={{ fontSize: 10, color: colors.subText }}>{msg.time}</Text>
                           {isMe && renderStatusTicks(msg.status)}
                         </View>
                       </View>
@@ -1364,7 +1530,7 @@ export default function ChatScreen() {
               <TouchableOpacity onPress={() => setShowRequestsView(true)} style={styles.requestPillBtn}>
                 <Text style={styles.emeraldLink}>Requests</Text>
                 {dmRequests.length > 0 && (
-                  <View style={styles.greenBadge}><Text style={styles.badgeWhiteText}>{dmRequests.length}</Text></View>
+                  <UnreadBadge count={dmRequests.length} />
                 )}
               </TouchableOpacity>
             </View>
@@ -1405,7 +1571,7 @@ export default function ChatScreen() {
                           <Text style={{ fontSize: 10, fontWeight: '700', color: '#D97706' }}>Pending</Text>
                         </View>
                       ) : dm.unread > 0 ? (
-                        <View style={styles.greenBadge}><Text style={styles.badgeWhiteText}>{dm.unread}</Text></View>
+                        <UnreadBadge count={dm.unread} />
                       ) : null}
                     </View>
                   </View>
@@ -1417,9 +1583,9 @@ export default function ChatScreen() {
           <TouchableOpacity
             onPress={() => { setDmSearchQuery(''); setSelectedRequestTarget(null); setRequestNoteText(''); setShowNewDmModal(true); }}
             activeOpacity={0.85}
-            style={[styles.fabPlus, { bottom: Math.max(insets.bottom + 10, 22) }]}
+            style={[styles.fabPlus, { bottom: Math.max(insets.bottom + 10, 22), backgroundColor: isDark ? '#FFFFFF' : '#09090B' }]}
           >
-            <Plus size={24} color="#FFFFFF" strokeWidth={2.5} />
+            <Plus size={22} color={isDark ? '#000000' : '#FFFFFF'} strokeWidth={1.5} />
           </TouchableOpacity>
         </View>
       ) : (
@@ -1489,14 +1655,14 @@ export default function ChatScreen() {
                           <TouchableOpacity
                             key={emoji}
                             onPress={() => handleDmReaction(activeDm.id, msg.id, emoji)}
-                            style={[styles.reactionPill, msg.userReacted.includes(emoji) && { borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.16)' }]}
+                            style={[styles.reactionPill, msg.userReacted.includes(emoji) && { borderColor: colors.border, backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' }]}
                           >
                             <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text }}>{emoji} {count}</Text>
                           </TouchableOpacity>
                         ))}
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontSize: 10, color: isMe ? '#D1FAE5' : colors.subText }}>{msg.time}</Text>
+                        <Text style={{ fontSize: 10, color: colors.subText }}>{msg.time}</Text>
                         {isMe && renderStatusTicks(msg.status)}
                       </View>
                     </View>
@@ -1633,8 +1799,15 @@ export default function ChatScreen() {
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity onPress={handleSendMessage} style={styles.sendSquircle} activeOpacity={0.85}>
-                  <Send size={18} color="#FFFFFF" />
+                <TouchableOpacity
+                  onPress={handleSendMessage}
+                  style={[
+                    styles.sendSquircle,
+                    { backgroundColor: isDark ? '#FFFFFF' : '#09090B' },
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <Send size={18} color={isDark ? '#000000' : '#FFFFFF'} strokeWidth={1.5} />
                 </TouchableOpacity>
               </View>
 
@@ -1692,7 +1865,13 @@ export default function ChatScreen() {
       {/* ============================================================
           MODAL 1: PRIVACY-FIRST DM SEARCH & REQUEST
       ============================================================ */}
-      <Modal visible={showNewDmModal} animationType="slide" transparent>
+      {showNewDmModal && (
+        <Modal
+          visible={true}
+          animationType="slide"
+          transparent
+          onRequestClose={() => { setShowNewDmModal(false); setSelectedRequestTarget(null); }}
+        >
         <View style={[styles.modalContainer, { backgroundColor: colors.bg, paddingTop: insets.top + 12 }]}>
           <View style={styles.rowBetween}>
             <View>
@@ -1743,9 +1922,9 @@ export default function ChatScreen() {
                 multiline
                 style={[styles.noteInput, { color: colors.text, borderColor: colors.border }]}
               />
-              <TouchableOpacity onPress={handleSendDmRequest} style={styles.primaryBtn}>
-                <UserPlus size={16} color="#FFFFFF" />
-                <Text style={styles.primaryBtnText}>Send Message Request</Text>
+              <TouchableOpacity onPress={handleSendDmRequest} style={[styles.primaryBtn, { backgroundColor: isDark ? '#FFFFFF' : '#09090B' }]}>
+                <UserPlus size={16} color={isDark ? '#000000' : '#FFFFFF'} strokeWidth={1.5} />
+                <Text style={[styles.primaryBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>Send Message Request</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -1759,8 +1938,8 @@ export default function ChatScreen() {
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{res.name} ({res.building} {res.flat})</Text>
                     <Text style={{ fontSize: 11, color: colors.subText }}>Contact & Birthdate Hidden</Text>
                   </View>
-                  <TouchableOpacity onPress={() => setSelectedRequestTarget(res)} style={styles.smallEmeraldBtn}>
-                    <Text style={styles.primaryBtnText}>Request</Text>
+                  <TouchableOpacity onPress={() => setSelectedRequestTarget(res)} style={[styles.smallEmeraldBtn, { backgroundColor: isDark ? '#FFFFFF' : '#09090B' }]}>
+                    <Text style={[styles.primaryBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>Request</Text>
                   </TouchableOpacity>
                 </View>
               ))}
@@ -1768,11 +1947,18 @@ export default function ChatScreen() {
           )}
         </View>
       </Modal>
+      )}
 
       {/* ============================================================
           MODAL 2: INCOMING DM REQUESTS
       ============================================================ */}
-      <Modal visible={showRequestsView} animationType="slide" transparent>
+      {showRequestsView && (
+        <Modal
+          visible={true}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowRequestsView(false)}
+        >
         <View style={[styles.modalContainer, { backgroundColor: colors.bg, paddingTop: insets.top + 12 }]}>
           {/* Header: Title with live count on left, squircle close button on right, NO subtext */}
           <View style={[styles.rowBetween, { marginBottom: 16, marginTop: 4 }]}>
@@ -1882,10 +2068,10 @@ export default function ChatScreen() {
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => handleAcceptRequest(req)}
-                      style={styles.requestAcceptBtn}
+                      style={[styles.requestAcceptBtn, { backgroundColor: isDark ? '#FFFFFF' : '#09090B' }]}
                     >
-                      <Check size={16} color="#FFFFFF" strokeWidth={2.5} />
-                      <Text style={styles.requestAcceptText}>Accept</Text>
+                      <Check size={16} color={isDark ? '#000000' : '#FFFFFF'} strokeWidth={1.5} />
+                      <Text style={[styles.requestAcceptText, { color: isDark ? '#000000' : '#FFFFFF' }]}>Accept</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1894,6 +2080,7 @@ export default function ChatScreen() {
           </ScrollView>
         </View>
       </Modal>
+      )}
     </KeyboardAvoidingView>
   );
 }

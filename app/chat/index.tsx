@@ -25,6 +25,7 @@ import {
   CheckCheck,
 } from 'lucide-react-native';
 import { ChatBubble } from '@/components/ChatBubble';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { ChatMessage, DirectMessageThread } from '@/types';
 import { chatService } from '@/services/chat';
 import { useAuth } from '@/context/AuthContext';
@@ -48,6 +49,7 @@ export default function ChatScreen() {
   // Direct Messages state
   const [dmThreads, setDmThreads] = useState<DirectMessageThread[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   const flashListRef = useRef<any>(null);
   const textInputRef = useRef<TextInput | null>(null);
@@ -60,11 +62,34 @@ export default function ChatScreen() {
       setDmThreads(threads);
     } catch {
       // fallback
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadData();
+
+    // Subscribe to live Supabase Realtime community messages
+    const unsubscribe = chatService.subscribeToMessages((event) => {
+      if (event.eventType === 'INSERT') {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === event.new.id)) return prev;
+          return [...prev, event.new];
+        });
+        setTimeout(() => {
+          flashListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      } else if (event.eventType === 'UPDATE') {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === event.new.id ? { ...m, ...event.new } : m))
+        );
+      }
+    }, { roomType: 'community' });
+
+    return () => {
+      unsubscribe();
+    };
   }, [loadData]);
 
   const handleSendMessage = async () => {
@@ -99,7 +124,7 @@ export default function ChatScreen() {
   const handleAttachMedia = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -139,6 +164,10 @@ export default function ChatScreen() {
     t.recipient.wing.toLowerCase().includes(searchQuery.toLowerCase()) ||
     t.recipient.flat_number.includes(searchQuery)
   );
+
+  if (isLoading) {
+    return <SkeletonLoader variant="chat" />;
+  }
 
   return (
     <View style={[styles.canvas, { paddingTop: insets.top }]}>

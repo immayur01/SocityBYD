@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Image } from 'expo-image';
-import { ThumbsUp, AlertCircle, CheckCircle2, Clock, ShieldAlert, Lock, Globe2 } from 'lucide-react-native';
+import { ThumbsUp, ShieldCheck, Lock } from 'lucide-react-native';
 import { Complaint } from '@/types';
-import { GlassCard } from './GlassCard';
 import { complaintsService } from '@/services/complaints';
 import { useTheme } from '@/context/ThemeContext';
 import * as Haptics from 'expo-haptics';
@@ -14,7 +13,7 @@ interface ComplaintCardProps {
 }
 
 export const ComplaintCard: React.FC<ComplaintCardProps> = ({ complaint, onUpvoteChange }) => {
-  const { tokens, isDark } = useTheme();
+  const { isDark } = useTheme();
   const [isUpvoted, setIsUpvoted] = useState(complaint.is_upvoted ?? false);
   const [upvotesCount, setUpvotesCount] = useState(complaint.upvotes_count);
 
@@ -37,283 +36,291 @@ export const ComplaintCard: React.FC<ComplaintCardProps> = ({ complaint, onUpvot
     }
   };
 
-  const getStatusColor = (status: string) => {
+  // Status dot color mapping
+  const getStatusConfig = (status: string) => {
     switch (status) {
       case 'Resolved':
-        return { bg: 'rgba(16, 185, 129, 0.18)', text: '#10b981', icon: <CheckCircle2 size={12} color="#10b981" /> };
+        return { dotColor: '#22C55E', label: 'Resolved' };
       case 'In Progress':
-        return { bg: 'rgba(245, 158, 11, 0.18)', text: '#f59e0b', icon: <Clock size={12} color="#f59e0b" /> };
+        return { dotColor: '#EAB308', label: 'In Progress' };
       case 'Assigned':
-        return { bg: 'rgba(168, 85, 247, 0.18)', text: '#7c4dff', icon: <ShieldAlert size={12} color="#7c4dff" /> };
+        return { dotColor: isDark ? '#A1A1AA' : '#64748B', label: 'Assigned' };
       case 'Open':
       default:
-        return { bg: 'rgba(56, 189, 248, 0.18)', text: '#0284c7', icon: <AlertCircle size={12} color="#0284c7" /> };
+        return { dotColor: isDark ? '#71717A' : '#94A3B8', label: 'Open' };
     }
   };
 
-  const getUrgencyBadge = (urgency: string) => {
-    switch (urgency) {
-      case 'Urgent':
-        return { bg: 'rgba(239, 68, 68, 0.2)', text: '#ef4444' };
-      case 'High':
-        return { bg: 'rgba(249, 115, 22, 0.2)', text: '#f97316' };
-      case 'Normal':
-      default:
-        return { bg: isDark ? 'rgba(148, 163, 184, 0.15)' : 'rgba(100, 116, 139, 0.12)', text: tokens.textSecondary };
-    }
+  const statusConfig = getStatusConfig(complaint.status);
+
+  // Format category to quiet sentence case
+  const formatCategory = (cat: string) => {
+    return cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase();
   };
 
-  const statusInfo = getStatusColor(complaint.status);
-  const urgencyInfo = getUrgencyBadge(complaint.urgency);
+  // Monospace unit number
+  const unitNumber = complaint.user
+    ? `${complaint.user.wing?.replace('Wing ', '') || 'B'}-${complaint.user.flat_number || '402'}`
+    : 'B-402';
+
+  // Ticket ID reference
+  const ticketRef = `#TK-${complaint.id.replace('comp-', '892')}`;
+
+  const cardBg = isDark ? '#111113' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
 
   return (
-    <GlassCard style={styles.cardContainer}>
-      {/* Top Row: Visibility Badge + Urgency + Status */}
-      <View style={styles.topRow}>
-        <View style={styles.leftBadges}>
-          {/* Public vs Admin Badge */}
-          <View
-            style={[
-              styles.visibilityBadge,
-              {
-                backgroundColor: tokens.bgSurface,
-                borderColor: tokens.borderSubtle,
-              },
-            ]}
-          >
-            {complaint.visibility === 'admin' ? (
-              <>
-                <Lock size={10} color="#f87171" />
-                <Text style={styles.visibilityAdminText}>Admin Only</Text>
-              </>
-            ) : (
-              <>
-                <Globe2 size={10} color={tokens.textInfo} />
-                <Text style={[styles.visibilityPublicText, { color: tokens.textInfo }]}>
-                  Public
-                </Text>
-              </>
-            )}
-          </View>
+    <View style={[styles.cardContainer, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+      {/* 1. Clean Metadata Row (Category + Optional Priority left, 6px Status dot right) */}
+      <View style={styles.metaRow}>
+        <View style={styles.metaLeft}>
+          {complaint.visibility === 'admin' && (
+            <View style={styles.adminDirectTag}>
+              <Lock size={11} strokeWidth={1.5} color="#EF4444" style={{ marginRight: 4 }} />
+              <Text style={styles.adminDirectText}>Direct to admin</Text>
+              <Text style={styles.metaDot}>·</Text>
+            </View>
+          )}
 
-          {/* Urgency Badge */}
-          <View style={[styles.urgencyBadge, { backgroundColor: urgencyInfo.bg }]}>
-            <Text style={[styles.urgencyText, { color: urgencyInfo.text }]}>
-              {complaint.urgency}
-            </Text>
-          </View>
+          <Text style={styles.categoryText}>{formatCategory(complaint.category)}</Text>
+
+          {/* Show priority tag only when Urgent or High */}
+          {complaint.urgency === 'Urgent' ? (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.priorityUrgentText}>Urgent</Text>
+            </>
+          ) : complaint.urgency === 'High' ? (
+            <>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.priorityHighText}>High</Text>
+            </>
+          ) : null}
         </View>
 
-        {/* Status Badge */}
-        <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
-          {statusInfo.icon}
-          <Text style={[styles.statusText, { color: statusInfo.text }]}>
-            {complaint.status}
-          </Text>
+        {/* Status Dot + Text (No glowing/tinted pill) */}
+        <View style={styles.statusRow}>
+          <View style={[styles.statusDot, { backgroundColor: statusConfig.dotColor }]} />
+          <Text style={styles.statusLabelText}>{statusConfig.label}</Text>
         </View>
       </View>
 
-      {/* Category Label */}
-      <Text style={[styles.categoryLabel, { color: tokens.accentPurple }]}>
-        {complaint.category}
-      </Text>
-
-      {/* Complaint Title */}
-      <Text style={[styles.titleText, { color: tokens.textPrimary }]}>
+      {/* 2. Ticket Title */}
+      <Text style={[styles.titleText, { color: isDark ? '#F5F5F5' : '#111113' }]}>
         {complaint.title}
       </Text>
 
-      {/* Complaint Description */}
-      <Text style={[styles.descText, { color: tokens.textSecondary }]}>
+      {/* 3. Description */}
+      <Text style={[styles.descText, { color: isDark ? '#A1A1AA' : '#4B5563' }]}>
         {complaint.description}
       </Text>
 
-      {/* Media attachment if any */}
+      {/* 4. Media attachment (Completely hidden if no image) */}
       {complaint.media_url ? (
-        <View
-          style={[
-            styles.mediaWrapper,
-            {
-              backgroundColor: tokens.bgApp,
-              borderColor: tokens.borderSubtle,
-              borderWidth: 1,
-            },
-          ]}
-        >
+        <View style={[styles.mediaWrapper, { borderColor: cardBorder }]}>
           <Image
             source={{ uri: complaint.media_url }}
             style={styles.media}
             contentFit="cover"
-            transition={200}
+            transition={150}
           />
         </View>
       ) : null}
 
-      {/* Admin Resolution Note if in progress / resolved */}
+      {/* 5. Official Admin Response Block (Quiet stepped neutral surface with 2px accent bar) */}
       {complaint.admin_note ? (
         <View
           style={[
             styles.adminNoteBox,
             {
-              backgroundColor: tokens.bgSurface,
-              borderColor: tokens.borderSubtle,
+              backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+              borderLeftColor: isDark ? 'rgba(255, 255, 255, 0.4)' : '#71717A',
             },
           ]}
         >
           <View style={styles.adminNoteHeader}>
-            <ShieldAlert size={12} color="#7C4DFF" />
-            <Text style={[styles.adminNoteTitle, { color: tokens.accentPurple }]}>
-              Admin Response
+            <ShieldCheck size={13} strokeWidth={1.5} color={isDark ? '#E4E4E7' : '#18181B'} />
+            <Text style={[styles.adminNoteTitle, { color: isDark ? '#E4E4E7' : '#18181B' }]}>
+              Admin response
             </Text>
           </View>
-          <Text style={[styles.adminNoteText, { color: tokens.textSecondary }]}>
+          <Text style={[styles.adminNoteText, { color: isDark ? '#A1A1AA' : '#4B5563' }]}>
             {complaint.admin_note}
           </Text>
         </View>
       ) : null}
 
-      {/* Footer Row: Resident Info + Upvote Button */}
-      <View
-        style={[
-          styles.footerRow,
-          { borderTopColor: tokens.borderDivider },
-        ]}
-      >
+      {/* 6. Footer Row: Resident Info + Monospace Unit / Ticket ID + Neutral Upvote */}
+      <View style={[styles.footerRow, { borderTopColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)' }]}>
         <View style={styles.authorInfo}>
-          <Text style={[styles.authorName, { color: tokens.textMuted }]}>
-            {complaint.user?.full_name || 'Resident'} •{' '}
+          <Text style={[styles.authorName, { color: isDark ? '#71717A' : '#6B7280' }]}>
+            {complaint.user?.full_name || 'Resident'}
           </Text>
-          <Text style={[styles.authorFlat, { color: tokens.accentPurple }]}>
-            {complaint.user ? `${complaint.user.wing?.replace('Wing ', '')}-${complaint.user.flat_number}` : 'B-402'}
+          <Text style={styles.footerDot}>·</Text>
+          <Text style={[styles.monoBadge, { color: isDark ? '#E4E4E7' : '#18181B' }]}>
+            {unitNumber}
+          </Text>
+          <Text style={styles.footerDot}>·</Text>
+          <Text style={[styles.ticketIdText, { color: isDark ? '#71717A' : '#6B7280' }]}>
+            {ticketRef}
           </Text>
         </View>
 
         {complaint.visibility === 'public' && (
           <TouchableOpacity
-            style={[styles.upvoteButton, isUpvoted && styles.upvoteActive]}
+            style={[
+              styles.upvoteButton,
+              {
+                backgroundColor: isUpvoted
+                  ? isDark ? '#F5F5F5' : '#111113'
+                  : isDark ? '#18181B' : '#F4F4F5',
+                borderColor: isUpvoted
+                  ? isDark ? '#F5F5F5' : '#111113'
+                  : cardBorder,
+              },
+            ]}
             onPress={handleUpvote}
             activeOpacity={0.7}
           >
             <ThumbsUp
-              size={14}
-              color={isUpvoted ? tokens.textInfo : tokens.textMuted}
-              fill={isUpvoted ? tokens.textInfo : 'transparent'}
+              size={13}
+              strokeWidth={1.5}
+              color={
+                isUpvoted
+                  ? isDark ? '#000000' : '#FFFFFF'
+                  : isDark ? '#A1A1AA' : '#6B7280'
+              }
+              fill={isUpvoted ? (isDark ? '#000000' : '#FFFFFF') : 'transparent'}
             />
-            <Text style={[styles.upvoteCount, isUpvoted && { color: tokens.textInfo }]}>
-              {upvotesCount} Upvotes
+            <Text
+              style={[
+                styles.upvoteCount,
+                {
+                  color: isUpvoted
+                    ? isDark ? '#000000' : '#FFFFFF'
+                    : isDark ? '#D4D4D8' : '#374151',
+                },
+              ]}
+            >
+              {upvotesCount}
             </Text>
           </TouchableOpacity>
         )}
       </View>
-    </GlassCard>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   cardContainer: {
-    marginBottom: 16,
+    marginBottom: 12,
     padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
   },
-  topRow: {
+  metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  leftBadges: {
+  metaLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+  },
+  adminDirectTag: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  visibilityBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    marginRight: 6,
-    borderWidth: 1,
-  },
-  visibilityAdminText: {
-    color: '#f87171',
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: 4,
-  },
-  visibilityPublicText: {
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: 4,
-  },
-  urgencyBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  urgencyText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  statusText: {
+  adminDirectText: {
+    color: '#EF4444',
     fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 4,
+    fontWeight: '500',
   },
-  categoryLabel: {
+  categoryText: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.1,
+  },
+  metaDot: {
+    color: '#52525B',
+    fontSize: 12,
+    marginHorizontal: 6,
+  },
+  priorityUrgentText: {
+    color: '#EF4444',
     fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
+    fontWeight: '600',
+  },
+  priorityHighText: {
+    color: '#F97316',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusLabelText: {
+    color: '#A1A1AA',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.1,
   },
   titleText: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 20,
-    marginBottom: 6,
+    marginBottom: 4,
+    letterSpacing: -0.1,
   },
   descText: {
     fontSize: 13,
     lineHeight: 18,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   mediaWrapper: {
     width: '100%',
     height: 160,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
-    marginBottom: 10,
+    borderWidth: 1,
+    marginBottom: 12,
   },
   media: {
     width: '100%',
     height: '100%',
   },
   adminNoteBox: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#7C4DFF',
+    borderLeftWidth: 2,
     borderRadius: 8,
-    padding: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginBottom: 12,
   },
   adminNoteHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     marginBottom: 4,
   },
   adminNoteTitle: {
     fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 5,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   adminNoteText: {
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 17,
   },
   footerRow: {
     flexDirection: 'row',
@@ -325,32 +332,42 @@ const styles = StyleSheet.create({
   authorInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
   },
   authorName: {
     fontSize: 11,
+    fontWeight: '400',
   },
-  authorFlat: {
+  footerDot: {
+    color: '#52525B',
     fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 4,
+    marginHorizontal: 5,
+  },
+  monoBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.2,
+  },
+  ticketIdText: {
+    fontSize: 11,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.2,
   },
   upvoteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.25)',
+    gap: 5,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 10,
-  },
-  upvoteActive: {
-    backgroundColor: 'rgba(56, 189, 248, 0.25)',
-    borderColor: '#38bdf8',
+    borderRadius: 8,
+    borderWidth: 1,
   },
   upvoteCount: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
   },
 });

@@ -88,7 +88,7 @@ export function TopHeader({
         ]}
         accessibilityLabel="Create Post"
       >
-        <Plus size={20} color={tokens.textPrimary} strokeWidth={2.2} />
+        <Plus size={18} color={tokens.textPrimary} strokeWidth={1.5} />
       </TouchableOpacity>
 
       {/* Center: Clean Single-Line Society Title */}
@@ -115,9 +115,9 @@ export function TopHeader({
           accessibilityLabel={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
         >
           {isDark ? (
-            <Sun size={18} color="#FBBF24" strokeWidth={2} />
+            <Sun size={18} color={tokens.textPrimary} strokeWidth={1.5} />
           ) : (
-            <Moon size={18} color={tokens.textPrimary} strokeWidth={2} />
+            <Moon size={18} color={tokens.textPrimary} strokeWidth={1.5} />
           )}
         </TouchableOpacity>
 
@@ -141,33 +141,34 @@ export function TopHeader({
             <Text
               style={[
                 styles.flatNumber,
-                { color: isDark ? '#94A3B8' : '#64748B' },
+                { color: tokens.textMuted },
               ]}
             >
               {displayFlat}
             </Text>
           </View>
 
-          {/* Nested rounded-square user avatar — dark slate in dark mode, crisp slate in light mode */}
+          {/* Nested rounded-square user avatar — neutral surface with subtle hairline */}
           <View
             style={[
               styles.avatarBox,
               isDark
                 ? {
-                    backgroundColor: '#242E42',
+                    backgroundColor: '#1C1C1E',
                     borderColor: 'rgba(255, 255, 255, 0.08)',
                     borderWidth: 1,
                   }
                 : {
-                    backgroundColor: '#1E293B',
-                    borderWidth: 0,
+                    backgroundColor: '#E4E4E7',
+                    borderColor: 'rgba(0, 0, 0, 0.08)',
+                    borderWidth: 1,
                   },
             ]}
           >
             <User
               size={15}
-              color={isDark ? '#E2E8F0' : '#FFFFFF'}
-              strokeWidth={2.2}
+              color={isDark ? '#E4E4E7' : '#111113'}
+              strokeWidth={1.5}
             />
           </View>
         </TouchableOpacity>

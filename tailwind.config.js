@@ -6,10 +6,10 @@ module.exports = {
     extend: {
       colors: {
         cosmic: {
-          bg: "#080813",
-          surface: "#13122b",
-          card: "rgba(28, 25, 52, 0.72)",
-          border: "rgba(255, 255, 255, 0.18)",
+          bg: "#000000",
+          surface: "#111111",
+          card: "#111111",
+          border: "rgba(255, 255, 255, 0.08)",
           purple: "#7c3aed",
           pink: "#ec4899",
           gold: "#f59e0b",

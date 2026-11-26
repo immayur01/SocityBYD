@@ -10,7 +10,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
-import { KeyboardStickyView, KeyboardAvoidingView } from '@/shims/keyboard-controller';
+import { KeyboardStickyView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -23,6 +23,7 @@ import {
   Video,
 } from 'lucide-react-native';
 import { ChatBubble } from '@/components/ChatBubble';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { ChatMessage, UserProfile } from '@/types';
 import { chatService } from '@/services/chat';
 import { RESIDENTS_DIRECTORY } from '@/services/mockData';
@@ -41,13 +42,39 @@ export default function DirectMessageDetailScreen() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
   const flashListRef = useRef<any>(null);
   const inputRef = useRef<TextInput | null>(null);
 
   useEffect(() => {
     chatService.getDmMessages(recipient.id).then((data) => {
       setMessages(data);
+    }).finally(() => {
+      setIsLoading(false);
     });
+
+    chatService.markMessagesAsRead(recipient.id);
+
+    // Subscribe to live Supabase Realtime direct messages
+    const unsubscribe = chatService.subscribeToMessages((event) => {
+      if (event.eventType === 'INSERT') {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === event.new.id)) return prev;
+          return [...prev, event.new];
+        });
+        setTimeout(() => {
+          flashListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      } else if (event.eventType === 'UPDATE') {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === event.new.id ? { ...m, ...event.new } : m))
+        );
+      }
+    }, { roomType: 'dm', roomId: recipient.id });
+
+    return () => {
+      unsubscribe();
+    };
   }, [recipient.id]);
 
   const handleSend = async () => {
@@ -72,7 +99,7 @@ export default function DirectMessageDetailScreen() {
   const handlePickMedia = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -84,6 +111,10 @@ export default function DirectMessageDetailScreen() {
       // fallback
     }
   };
+
+  if (isLoading) {
+    return <SkeletonLoader variant="chat" />;
+  }
 
   return (
     <View style={[styles.canvas, { paddingTop: insets.top }]}>

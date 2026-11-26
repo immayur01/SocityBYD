@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Plus,
   UtensilsCrossed,
@@ -23,8 +23,10 @@ import {
   ShoppingBag,
 } from 'lucide-react-native';
 import { DishCard } from '@/components/DishCard';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { FoodListing, DietType } from '@/types';
 import { foodService } from '@/services/food';
+import { useFoodListings, usePlaceFoodOrder, usePublishDish } from '@/hooks/queries/useFood';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useTheme } from '@/context/ThemeContext';
@@ -34,9 +36,12 @@ export default function FoodCornerScreen() {
   const { user } = useAuth();
   const { showToast } = useToast();
   const { tokens, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const dockHeight = 52 + Math.max(insets.bottom, 12);
 
-  const [dishes, setDishes] = useState<FoodListing[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+  const { data: dishes = [], isLoading, isRefetching, refetch } = useFoodListings();
+  const placeOrderMutation = usePlaceFoodOrder();
+  const publishDishMutation = usePublishDish();
 
   // Publish Dish state
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -46,7 +51,6 @@ export default function FoodCornerScreen() {
   const [timing, setTiming] = useState('Ready by 7:30 PM (Dinner)');
   const [portions, setPortions] = useState('5');
   const [dishImage, setDishImage] = useState<string | null>(null);
-  const [publishing, setPublishing] = useState(false);
 
   // Order Meal state
   const [selectedDish, setSelectedDish] = useState<FoodListing | null>(null);
@@ -55,31 +59,11 @@ export default function FoodCornerScreen() {
     user ? `${user.wing?.replace('Wing ', '')}-${user.flat_number}` : 'B-402'
   );
   const [deliveryNote, setDeliveryNote] = useState('');
-  const [ordering, setOrdering] = useState(false);
-
-  const loadDishes = useCallback(async () => {
-    try {
-      const data = await foodService.getFoodListings();
-      setDishes(data);
-    } catch {
-      // fallback
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDishes();
-  }, [loadDishes]);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadDishes();
-    setRefreshing(false);
-  };
 
   const handlePickDishPhoto = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -108,8 +92,7 @@ export default function FoodCornerScreen() {
     }
 
     try {
-      setPublishing(true);
-      await foodService.publishDish({
+      await publishDishMutation.mutateAsync({
         dishName: dishName.trim(),
         price: numPrice,
         dietType,
@@ -123,11 +106,8 @@ export default function FoodCornerScreen() {
       setDishName('');
       setPrice('');
       setDishImage(null);
-      await loadDishes();
     } catch (err: any) {
       showToast('Error', err.message || 'Failed to publish dish.', 'error');
-    } finally {
-      setPublishing(false);
     }
   };
 
@@ -140,8 +120,7 @@ export default function FoodCornerScreen() {
     }
 
     try {
-      setOrdering(true);
-      await foodService.placeOrder({
+      await placeOrderMutation.mutateAsync({
         listingId: selectedDish.id,
         quantity: orderQuantity,
         deliveryFlat: deliveryFlat.trim(),
@@ -156,11 +135,8 @@ export default function FoodCornerScreen() {
       setSelectedDish(null);
       setOrderQuantity(1);
       setDeliveryNote('');
-      await loadDishes();
     } catch (err: any) {
       showToast('Order Failed', err.message || 'Could not place meal order.', 'error');
-    } finally {
-      setOrdering(false);
     }
   };
 
@@ -175,61 +151,69 @@ export default function FoodCornerScreen() {
 
         {/* Publish a Dish CTA Button */}
         <TouchableOpacity
-          style={styles.publishTriggerBtn}
+          style={[
+            styles.publishTriggerBtn,
+            { backgroundColor: tokens.textPrimary },
+          ]}
           onPress={() => {
             if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             setShowPublishModal(true);
           }}
           activeOpacity={0.85}
         >
-          <LinearGradient
-            colors={['#f59e0b', '#d97706']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.publishBtnGradient}
-          >
-            <ChefHat size={16} color="#000000" />
-            <Text style={styles.publishTriggerText}>Cook & Earn</Text>
-          </LinearGradient>
+          <View style={styles.publishBtnRow}>
+            <ChefHat size={16} color={tokens.bgApp} strokeWidth={1.5} />
+            <Text style={[styles.publishTriggerText, { color: tokens.bgApp }]}>Cook & Earn</Text>
+          </View>
         </TouchableOpacity>
       </View>
 
       {/* Main Dishes FlashList */}
-      <FlashList
-        data={dishes}
-        renderItem={({ item }) => (
-          <DishCard
-            dish={item}
-            onOrderPress={(dish) => {
-              if (Platform.OS !== 'web') Haptics.selectionAsync();
-              setSelectedDish(dish);
-            }}
-          />
-        )}
-        keyExtractor={(item) => item.id}
-        estimatedItemSize={300}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#f59e0b"
-            colors={['#f59e0b', '#ec4899']}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <UtensilsCrossed size={40} color="#64748b" />
-            <Text style={styles.emptyTitle}>No meals listed right now</Text>
-            <Text style={styles.emptySubtitle}>
-              Are you preparing dinner or snacks today? Tap "Cook & Earn" to list your fresh dish!
-            </Text>
-          </View>
-        }
-      />
+      {isLoading && !isRefetching ? (
+        <SkeletonLoader variant="food" />
+      ) : (
+        <FlashList
+          data={dishes}
+          renderItem={({ item }) => (
+            <DishCard
+              dish={item}
+              onOrderPress={(dish) => {
+                if (Platform.OS !== 'web') Haptics.selectionAsync();
+                setSelectedDish(dish);
+              }}
+            />
+          )}
+          keyExtractor={(item) => item.id}
+          estimatedItemSize={300}
+          contentContainerStyle={{ ...styles.listContent, paddingBottom: dockHeight }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={tokens.textPrimary}
+              colors={[tokens.textPrimary]}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <UtensilsCrossed size={40} color="#64748b" />
+              <Text style={styles.emptyTitle}>No meals listed right now</Text>
+              <Text style={styles.emptySubtitle}>
+                Are you preparing dinner or snacks today? Tap "Cook & Earn" to list your fresh dish!
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       {/* ===================== PUBLISH A DISH MODAL ===================== */}
-      <Modal visible={showPublishModal} animationType="slide" transparent>
+      {showPublishModal && (
+        <Modal
+          visible={true}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowPublishModal(false)}
+        >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -329,29 +313,32 @@ export default function FoodCornerScreen() {
 
               {/* Submit Button */}
               <TouchableOpacity
-                style={styles.modalSubmitBtn}
+                style={[
+                  styles.modalSubmitBtn,
+                  { backgroundColor: tokens.textPrimary },
+                ]}
                 onPress={handlePublishDish}
-                disabled={publishing}
+                disabled={publishDishMutation.isPending}
                 activeOpacity={0.85}
               >
-                <LinearGradient
-                  colors={['#f59e0b', '#d97706']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.modalSubmitGradient}
-                >
-                  <Text style={styles.modalSubmitText}>
-                    {publishing ? 'Publishing Dish...' : 'Publish to Food Corner →'}
-                  </Text>
-                </LinearGradient>
+                <Text style={[styles.modalSubmitText, { color: tokens.bgApp }]}>
+                  {publishDishMutation.isPending ? 'Publishing Dish...' : 'Publish to Food Corner →'}
+                </Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
       </Modal>
+      )}
 
       {/* ===================== ORDER MEAL CONFIRMATION SHEET ===================== */}
-      <Modal visible={Boolean(selectedDish)} animationType="slide" transparent>
+      {Boolean(selectedDish) && (
+        <Modal
+          visible={true}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setSelectedDish(null)}
+        >
         <View style={styles.modalOverlay}>
           <View style={styles.orderSheet}>
             <View style={styles.modalHeader}>
@@ -430,28 +417,27 @@ export default function FoodCornerScreen() {
 
                 {/* Confirm Order CTA */}
                 <TouchableOpacity
-                  style={styles.modalSubmitBtn}
+                  style={[
+                    styles.modalSubmitBtn,
+                    { backgroundColor: tokens.textPrimary },
+                  ]}
                   onPress={handleConfirmOrder}
-                  disabled={ordering}
+                  disabled={placeOrderMutation.isPending}
                   activeOpacity={0.85}
                 >
-                  <LinearGradient
-                    colors={['#10b981', '#059669']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.modalSubmitGradient}
-                  >
-                    <CheckCircle2 size={18} color="#ffffff" />
-                    <Text style={[styles.modalSubmitText, { marginLeft: 8 }]}>
-                      {ordering ? 'Placing Order...' : 'Place Order (Pay on Delivery)'}
+                  <View style={styles.modalSubmitRow}>
+                    <CheckCircle2 size={16} color={tokens.bgApp} strokeWidth={1.5} />
+                    <Text style={[styles.modalSubmitText, { color: tokens.bgApp, marginLeft: 8 }]}>
+                      {placeOrderMutation.isPending ? 'Placing Order...' : 'Place Order (Pay on Delivery)'}
                     </Text>
-                  </LinearGradient>
+                  </View>
                 </TouchableOpacity>
               </View>
             )}
           </View>
         </View>
       </Modal>
+      )}
     </View>
   );
 }
@@ -485,25 +471,24 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   publishTriggerBtn: {
-    borderRadius: 12,
-    overflow: 'hidden',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  publishBtnGradient: {
+  publishBtnRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    gap: 6,
   },
   publishTriggerText: {
-    color: '#000000',
     fontSize: 12,
-    fontWeight: '800',
-    marginLeft: 6,
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 14,
-    paddingBottom: 96,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -512,12 +497,12 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '600',
     marginTop: 12,
   },
   emptySubtitle: {
-    color: '#64748b',
+    color: '#71717A',
     fontSize: 12,
     marginTop: 4,
     textAlign: 'center',
@@ -525,25 +510,25 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#181534',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: '#121214',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
-    borderTopWidth: 1.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.18)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
     maxHeight: '90%',
   },
   orderSheet: {
-    backgroundColor: '#181534',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: '#121214',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 20,
-    borderTopWidth: 1.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.18)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -557,29 +542,29 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     marginLeft: 8,
   },
   closeBtn: {
     padding: 6,
   },
   formLabel: {
-    color: '#cbd5e1',
+    color: '#A1A1AA',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     marginBottom: 6,
     marginTop: 10,
   },
   formInput: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#18181B',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
   },
   dietSelectorRow: {
     flexDirection: 'row',
@@ -590,30 +575,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#18181B',
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   dietTabVegActive: {
     borderColor: '#22c55e',
-    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+    backgroundColor: 'rgba(34, 197, 94, 0.1)',
   },
   dietTabNonVegActive: {
     borderColor: '#ef4444',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
   },
   dietCircle: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     marginRight: 8,
   },
   dietTabText: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   twoColRow: {
     flexDirection: 'row',
@@ -625,56 +610,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#18181B',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     borderStyle: 'dashed',
     paddingVertical: 14,
   },
   photoUploadText: {
-    color: '#f59e0b',
+    color: '#E4E4E7',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '500',
     marginLeft: 8,
   },
   modalSubmitBtn: {
-    borderRadius: 14,
-    overflow: 'hidden',
+    borderRadius: 12,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 20,
     marginBottom: 10,
   },
-  modalSubmitGradient: {
+  modalSubmitRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 50,
   },
   modalSubmitText: {
-    color: '#000000',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
   orderSummaryCard: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#18181B',
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
     marginBottom: 10,
   },
   orderDishName: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   orderChefInfo: {
-    color: '#94a3b8',
+    color: '#A1A1AA',
     fontSize: 12,
     marginTop: 4,
   },
   orderTimingInfo: {
-    color: '#fbbf24',
+    color: '#E4E4E7',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     marginTop: 4,
   },
   quantityRow: {
@@ -686,27 +673,29 @@ const styles = StyleSheet.create({
   quantityControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    backgroundColor: '#18181B',
     borderRadius: 10,
     padding: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
   qtyBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#1C1C1E',
     alignItems: 'center',
     justifyContent: 'center',
   },
   qtyBtnText: {
     color: '#ffffff',
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   qtyValue: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
     paddingHorizontal: 16,
   },
   totalRow: {
@@ -716,21 +705,21 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
   },
   totalLabel: {
-    color: '#cbd5e1',
+    color: '#A1A1AA',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   totalPaymentNote: {
-    color: '#10b981',
-    fontSize: 10,
-    fontWeight: '600',
+    color: '#71717A',
+    fontSize: 11,
+    fontWeight: '400',
   },
   totalAmount: {
     color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });

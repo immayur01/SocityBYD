@@ -10,20 +10,21 @@ import {
   ScrollView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 import {
   Plus,
   Lock,
   Globe2,
   X,
-  AlertTriangle,
-  Image as ImageIcon,
+  Info,
+  ImageIcon,
   CheckCircle2,
-  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react-native';
 import { ComplaintCard } from '@/components/ComplaintCard';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 import {
   Complaint,
   ComplaintVisibility,
@@ -31,6 +32,11 @@ import {
   ComplaintUrgency,
 } from '@/types';
 import { complaintsService } from '@/services/complaints';
+import {
+  useComplaints,
+  useToggleComplaintUpvote,
+  useFileComplaint,
+} from '@/hooks/queries/useComplaints';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useTheme } from '@/context/ThemeContext';
@@ -47,13 +53,25 @@ const CATEGORIES: ComplaintCategory[] = [
 const URGENCIES: ComplaintUrgency[] = ['Normal', 'High', 'Urgent'];
 
 export default function ComplaintsScreen() {
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { showToast } = useToast();
-  const { tokens, isDark } = useTheme();
+  const { isDark } = useTheme();
 
   const [activeTab, setActiveTab] = useState<ComplaintVisibility>('public');
-  const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+
+  const {
+    complaints,
+    isLoading,
+    isRefetching,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useComplaints(activeTab);
+
+  const toggleUpvoteMutation = useToggleComplaintUpvote();
+  const fileComplaintMutation = useFileComplaint();
 
   // File Complaint state
   const [showFileModal, setShowFileModal] = useState(false);
@@ -63,31 +81,20 @@ export default function ComplaintsScreen() {
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formPhoto, setFormPhoto] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  const loadComplaints = useCallback(async () => {
-    try {
-      const data = await complaintsService.getComplaints(activeTab);
-      setComplaints(data);
-    } catch {
-      // fallback
+  // Bottom dock safe padding
+  const dockHeight = 52 + Math.max(insets.bottom, 12);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
     }
-  }, [activeTab]);
-
-  useEffect(() => {
-    loadComplaints();
-  }, [loadComplaints]);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadComplaints();
-    setRefreshing(false);
-  };
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handlePickPhoto = async () => {
     try {
       const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         quality: 0.8,
       });
@@ -110,8 +117,7 @@ export default function ComplaintsScreen() {
     }
 
     try {
-      setSubmitting(true);
-      await complaintsService.fileComplaint({
+      await fileComplaintMutation.mutateAsync({
         visibility: formVisibility,
         category: formCategory,
         urgency: formUrgency,
@@ -132,34 +138,44 @@ export default function ComplaintsScreen() {
       setFormTitle('');
       setFormDescription('');
       setFormPhoto(null);
-      await loadComplaints();
     } catch (err: any) {
       showToast('Error', err.message || 'Failed to file complaint.', 'error');
-    } finally {
-      setSubmitting(false);
     }
   };
 
+  const canvasBg = isDark ? '#000000' : '#F5F5F7';
+  const hairline = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+
   return (
-    <View style={[styles.container, { backgroundColor: tokens.bgApp }]}>
-      {/* Sub Header: Segmented Dual Tabs */}
-      <View style={[styles.subHeader, { borderBottomColor: tokens.borderSubtle }]}>
-        <View style={styles.segmentedRow}>
+    <View style={[styles.container, { backgroundColor: canvasBg }]}>
+      {/* 1. Sub Header: Segmented Dual Tabs & Primary Action */}
+      <View style={[styles.subHeader, { borderBottomColor: hairline }]}>
+        <View style={[styles.segmentedRow, { borderColor: hairline, backgroundColor: isDark ? '#111113' : '#E5E5EA' }]}>
           <TouchableOpacity
-            style={[styles.segmentBtn, activeTab === 'public' && styles.segmentBtnActive]}
+            style={[
+              styles.segmentBtn,
+              activeTab === 'public' && {
+                backgroundColor: isDark ? '#F5F5F5' : '#111113',
+              },
+            ]}
             onPress={() => {
               if (Platform.OS !== 'web') Haptics.selectionAsync();
               setActiveTab('public');
             }}
+            activeOpacity={0.7}
           >
             <Globe2
-              size={14}
-              color={activeTab === 'public' ? '#38bdf8' : '#94a3b8'}
+              size={13}
+              strokeWidth={1.5}
+              color={activeTab === 'public' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A'}
             />
             <Text
               style={[
                 styles.segmentText,
-                activeTab === 'public' && styles.segmentTextActive,
+                {
+                  color: activeTab === 'public' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A',
+                  fontWeight: activeTab === 'public' ? '600' : '400',
+                },
               ]}
             >
               Public Community
@@ -167,20 +183,30 @@ export default function ComplaintsScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.segmentBtn, activeTab === 'admin' && styles.segmentBtnActive]}
+            style={[
+              styles.segmentBtn,
+              activeTab === 'admin' && {
+                backgroundColor: isDark ? '#F5F5F5' : '#111113',
+              },
+            ]}
             onPress={() => {
               if (Platform.OS !== 'web') Haptics.selectionAsync();
               setActiveTab('admin');
             }}
+            activeOpacity={0.7}
           >
             <Lock
-              size={14}
-              color={activeTab === 'admin' ? '#fca5a5' : '#94a3b8'}
+              size={13}
+              strokeWidth={1.5}
+              color={activeTab === 'admin' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A'}
             />
             <Text
               style={[
                 styles.segmentText,
-                activeTab === 'admin' && styles.segmentTextActive,
+                {
+                  color: activeTab === 'admin' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A',
+                  fontWeight: activeTab === 'admin' ? '600' : '400',
+                },
               ]}
             >
               Direct to Admin
@@ -188,9 +214,14 @@ export default function ComplaintsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* File Complaint Trigger Button */}
+        {/* Primary "+ File Ticket" Button (Crisp off-white / monochrome button) */}
         <TouchableOpacity
-          style={styles.fileTriggerBtn}
+          style={[
+            styles.fileTriggerBtn,
+            {
+              backgroundColor: isDark ? '#FFFFFF' : '#09090B',
+            },
+          ]}
           onPress={() => {
             if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             setFormVisibility(activeTab);
@@ -198,191 +229,327 @@ export default function ComplaintsScreen() {
           }}
           activeOpacity={0.85}
         >
-          <LinearGradient
-            colors={['#0284c7', '#0369a1']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.fileBtnGradient}
+          <Plus size={15} strokeWidth={2} color={isDark ? '#09090B' : '#FFFFFF'} />
+          <Text
+            style={[
+              styles.fileBtnText,
+              { color: isDark ? '#09090B' : '#FFFFFF' },
+            ]}
           >
-            <Plus size={16} color="#ffffff" />
-            <Text style={styles.fileBtnText}>File Ticket</Text>
-          </LinearGradient>
+            File Ticket
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Info notice bar */}
-      <View style={styles.infoBanner}>
+      {/* 2. Quiet Info Notice Bar (No emoji, no blue wash) */}
+      <View style={[styles.infoBanner, { borderBottomColor: hairline }]}>
+        <Info size={13} strokeWidth={1.5} color="#71717A" style={{ marginRight: 6 }} />
         <Text style={styles.infoBannerText}>
           {activeTab === 'public'
-            ? '📢 Society-wide issues visible to all residents. Upvote high-impact tickets to alert admin.'
-            : '🔒 Confidential tickets visible only to you and Society Admin / Committee members.'}
+            ? 'Society-wide issues visible to residents. Upvote high-impact tickets to prioritize.'
+            : 'Confidential tickets visible only to you and Society Admin / Committee members.'}
         </Text>
       </View>
 
-      {/* FlashList of Complaints */}
-      <FlashList
-        data={complaints}
-        renderItem={({ item }) => <ComplaintCard complaint={item} />}
-        keyExtractor={(item) => item.id}
-        estimatedItemSize={280}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#38bdf8"
-            colors={['#0284c7', '#7c3aed']}
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <CheckCircle2 size={42} color="#10b981" />
-            <Text style={styles.emptyTitle}>No active tickets in this section</Text>
-            <Text style={styles.emptySubtitle}>
-              {activeTab === 'public'
-                ? 'All society amenities and facilities are operating smoothly!'
-                : 'You have no pending direct tickets with the society office.'}
-            </Text>
-          </View>
-        }
-      />
+      {/* 3. FlashList of Complaints */}
+      {isLoading && !isRefetching ? (
+        <SkeletonLoader variant="complaints" />
+      ) : (
+        <FlashList
+          data={complaints}
+          renderItem={({ item }) => (
+            <ComplaintCard
+              complaint={item}
+              onUpvoteChange={(id) => toggleUpvoteMutation.mutate(id)}
+            />
+          )}
+          keyExtractor={(item) => item.id}
+          estimatedItemSize={220}
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: dockHeight,
+          }}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={isDark ? '#FFFFFF' : '#09090B'}
+              colors={[isDark ? '#FFFFFF' : '#09090B']}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <CheckCircle2 size={36} strokeWidth={1.5} color={isDark ? '#71717A' : '#9CA3AF'} />
+              <Text style={[styles.emptyTitle, { color: isDark ? '#F5F5F5' : '#111113' }]}>
+                No active tickets
+              </Text>
+              <Text style={styles.emptySubtitle}>
+                {activeTab === 'public'
+                  ? 'All society amenities and facilities are operating normally.'
+                  : 'You have no pending direct tickets with the society office.'}
+              </Text>
+            </View>
+          }
+        />
+      )}
 
       {/* ===================== FILE COMPLAINT MODAL ===================== */}
-      <Modal visible={showFileModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalTitleRow}>
-                <AlertTriangle size={20} color="#38bdf8" />
-                <Text style={styles.modalTitle}>File Society Complaint</Text>
+      {showFileModal && (
+        <Modal
+          visible={true}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setShowFileModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: isDark ? '#121214' : '#FFFFFF',
+                  borderColor: hairline,
+                },
+              ]}
+            >
+              <View style={[styles.modalHeader, { borderBottomColor: hairline }]}>
+                <View style={styles.modalTitleRow}>
+                  <ShieldCheck size={18} strokeWidth={1.5} color={isDark ? '#F5F5F5' : '#111113'} />
+                  <Text style={[styles.modalTitle, { color: isDark ? '#F5F5F5' : '#111113' }]}>
+                    File Society Ticket
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowFileModal(false)}
+                  style={styles.closeBtn}
+                  activeOpacity={0.7}
+                >
+                  <X size={18} strokeWidth={1.5} color="#71717A" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => setShowFileModal(false)} style={styles.closeBtn}>
-                <X size={20} color="#94a3b8" />
-              </TouchableOpacity>
+
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                {/* Target Visibility Switcher */}
+                <Text style={styles.formLabel}>Ticket Visibility</Text>
+                <View style={[styles.segmentedRow, { borderColor: hairline, backgroundColor: isDark ? '#18181B' : '#E5E5EA', marginBottom: 12 }]}>
+                  <TouchableOpacity
+                    style={[
+                      styles.segmentBtn,
+                      formVisibility === 'public' && {
+                        backgroundColor: isDark ? '#F5F5F5' : '#111113',
+                      },
+                    ]}
+                    onPress={() => setFormVisibility('public')}
+                  >
+                    <Globe2
+                      size={12}
+                      strokeWidth={1.5}
+                      color={formVisibility === 'public' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A'}
+                    />
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        {
+                          color: formVisibility === 'public' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A',
+                          fontWeight: formVisibility === 'public' ? '600' : '400',
+                        },
+                      ]}
+                    >
+                      Public Community
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.segmentBtn,
+                      formVisibility === 'admin' && {
+                        backgroundColor: isDark ? '#F5F5F5' : '#111113',
+                      },
+                    ]}
+                    onPress={() => setFormVisibility('admin')}
+                  >
+                    <Lock
+                      size={12}
+                      strokeWidth={1.5}
+                      color={formVisibility === 'admin' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A'}
+                    />
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        {
+                          color: formVisibility === 'admin' ? (isDark ? '#000000' : '#FFFFFF') : '#71717A',
+                          fontWeight: formVisibility === 'admin' ? '600' : '400',
+                        },
+                      ]}
+                    >
+                      Direct to Admin
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Category */}
+                <Text style={styles.formLabel}>Category</Text>
+                <View style={styles.chipRow}>
+                  {CATEGORIES.map((cat) => {
+                    const active = formCategory === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[
+                          styles.chip,
+                          {
+                            backgroundColor: active
+                              ? isDark ? '#FFFFFF' : '#111113'
+                              : isDark ? '#18181B' : '#F4F4F5',
+                            borderColor: active ? 'transparent' : hairline,
+                          },
+                        ]}
+                        onPress={() => setFormCategory(cat)}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            {
+                              color: active
+                                ? isDark ? '#000000' : '#FFFFFF'
+                                : isDark ? '#A1A1AA' : '#4B5563',
+                              fontWeight: active ? '600' : '400',
+                            },
+                          ]}
+                        >
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Urgency */}
+                <Text style={styles.formLabel}>Urgency</Text>
+                <View style={styles.urgencyRow}>
+                  {URGENCIES.map((urg) => {
+                    const active = formUrgency === urg;
+                    return (
+                      <TouchableOpacity
+                        key={urg}
+                        style={[
+                          styles.urgencyBtn,
+                          {
+                            backgroundColor: active
+                              ? isDark ? '#27272A' : '#E5E5EA'
+                              : isDark ? '#18181B' : '#F4F4F5',
+                            borderColor: active
+                              ? isDark ? '#3F3F46' : '#D1D5DB'
+                              : hairline,
+                          },
+                        ]}
+                        onPress={() => setFormUrgency(urg)}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.urgencyBtnText,
+                            {
+                              color: active
+                                ? urg === 'Urgent' ? '#EF4444' : isDark ? '#F5F5F5' : '#111113'
+                                : isDark ? '#71717A' : '#6B7280',
+                              fontWeight: active ? '600' : '400',
+                            },
+                          ]}
+                        >
+                          {urg}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Subject / Title */}
+                <Text style={styles.formLabel}>Subject</Text>
+                <TextInput
+                  style={[
+                    styles.formInput,
+                    {
+                      backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                      borderColor: hairline,
+                      color: isDark ? '#F5F5F5' : '#111113',
+                    },
+                  ]}
+                  placeholder="e.g. Wing B Elevator #2 vibration issue"
+                  placeholderTextColor="#71717A"
+                  value={formTitle}
+                  onChangeText={setFormTitle}
+                />
+
+                {/* Detailed Description */}
+                <Text style={styles.formLabel}>Description</Text>
+                <TextInput
+                  style={[
+                    styles.formInput,
+                    {
+                      height: 96,
+                      backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                      borderColor: hairline,
+                      color: isDark ? '#F5F5F5' : '#111113',
+                    },
+                  ]}
+                  placeholder="Describe location, timing, or safety details..."
+                  placeholderTextColor="#71717A"
+                  multiline
+                  numberOfLines={4}
+                  value={formDescription}
+                  onChangeText={setFormDescription}
+                  textAlignVertical="top"
+                />
+
+                {/* Photo Evidence */}
+                <Text style={styles.formLabel}>Photo Evidence (Optional)</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.photoUploadBtn,
+                    {
+                      backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                      borderColor: hairline,
+                    },
+                  ]}
+                  onPress={handlePickPhoto}
+                  activeOpacity={0.7}
+                >
+                  <ImageIcon size={18} strokeWidth={1.5} color="#A1A1AA" />
+                  <Text style={styles.photoUploadText}>
+                    {formPhoto ? 'Change Photo Evidence' : 'Attach Photo from Gallery'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Submit CTA */}
+                <TouchableOpacity
+                  style={[
+                    styles.modalSubmitBtn,
+                    {
+                      backgroundColor: isDark ? '#FFFFFF' : '#09090B',
+                    },
+                  ]}
+                  onPress={handleFileComplaint}
+                  disabled={fileComplaintMutation.isPending}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.modalSubmitText,
+                      { color: isDark ? '#000000' : '#FFFFFF' },
+                    ]}
+                  >
+                    {fileComplaintMutation.isPending ? 'Submitting...' : 'File Ticket'}
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Target Visibility Switcher */}
-              <Text style={styles.formLabel}>Complaint Visibility</Text>
-              <View style={styles.segmentedRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.segmentBtn,
-                    formVisibility === 'public' && styles.segmentBtnActive,
-                  ]}
-                  onPress={() => setFormVisibility('public')}
-                >
-                  <Globe2 size={13} color={formVisibility === 'public' ? '#38bdf8' : '#94a3b8'} />
-                  <Text style={[styles.segmentText, formVisibility === 'public' && styles.segmentTextActive]}>
-                    Public Community
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.segmentBtn,
-                    formVisibility === 'admin' && styles.segmentBtnActive,
-                  ]}
-                  onPress={() => setFormVisibility('admin')}
-                >
-                  <Lock size={13} color={formVisibility === 'admin' ? '#fca5a5' : '#94a3b8'} />
-                  <Text style={[styles.segmentText, formVisibility === 'admin' && styles.segmentTextActive]}>
-                    Direct to Admin
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Category */}
-              <Text style={styles.formLabel}>Category</Text>
-              <View style={styles.chipRow}>
-                {CATEGORIES.map((cat) => (
-                  <TouchableOpacity
-                    key={cat}
-                    style={[styles.chip, formCategory === cat && styles.chipActive]}
-                    onPress={() => setFormCategory(cat)}
-                  >
-                    <Text style={[styles.chipText, formCategory === cat && styles.chipTextActive]}>
-                      {cat}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Urgency */}
-              <Text style={styles.formLabel}>Urgency Level</Text>
-              <View style={styles.urgencyRow}>
-                {URGENCIES.map((urg) => (
-                  <TouchableOpacity
-                    key={urg}
-                    style={[styles.urgencyBtn, formUrgency === urg && styles.urgencyBtnActive]}
-                    onPress={() => setFormUrgency(urg)}
-                  >
-                    <Text style={[styles.urgencyBtnText, formUrgency === urg && styles.urgencyBtnTextActive]}>
-                      {urg}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Title / Subject */}
-              <Text style={styles.formLabel}>Subject / Title</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="e.g. Wing B Elevator #2 vibration issue"
-                placeholderTextColor="#64748b"
-                value={formTitle}
-                onChangeText={setFormTitle}
-              />
-
-              {/* Description */}
-              <Text style={styles.formLabel}>Detailed Description</Text>
-              <TextInput
-                style={[styles.formInput, { height: 100 }]}
-                placeholder="Describe the issue, exact location, timing..."
-                placeholderTextColor="#64748b"
-                multiline
-                numberOfLines={4}
-                value={formDescription}
-                onChangeText={setFormDescription}
-                textAlignVertical="top"
-              />
-
-              {/* Photo Evidence */}
-              <Text style={styles.formLabel}>Photo Evidence (Optional)</Text>
-              <TouchableOpacity
-                style={styles.photoUploadBtn}
-                onPress={handlePickPhoto}
-                activeOpacity={0.7}
-              >
-                <ImageIcon size={20} color="#38bdf8" />
-                <Text style={styles.photoUploadText}>
-                  {formPhoto ? 'Change Photo Evidence' : 'Attach Photo Proof from Gallery'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Submit CTA */}
-              <TouchableOpacity
-                style={styles.modalSubmitBtn}
-                onPress={handleFileComplaint}
-                disabled={submitting}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={['#0284c7', '#0369a1']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.modalSubmitGradient}
-                >
-                  <ShieldAlert size={18} color="#ffffff" />
-                  <Text style={[styles.modalSubmitText, { marginLeft: 8 }]}>
-                    {submitting ? 'Lodge Ticket...' : 'File Official Complaint'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </ScrollView>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -390,96 +557,79 @@ export default function ComplaintsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090D16',
   },
   subHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
   segmentedRow: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 3,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    flex: 1,
+    marginRight: 10,
   },
   segmentBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    justifyContent: 'center',
     paddingVertical: 6,
-    borderRadius: 9,
-  },
-  segmentBtnActive: {
-    backgroundColor: 'rgba(2, 132, 199, 0.25)',
+    borderRadius: 7,
+    gap: 5,
   },
   segmentText: {
-    color: '#94a3b8',
     fontSize: 11,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  segmentTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
+    letterSpacing: 0.1,
   },
   fileTriggerBtn: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginLeft: 8,
-  },
-  fileBtnGradient: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    height: 34,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 4,
   },
   fileBtnText: {
-    color: '#ffffff',
     fontSize: 12,
-    fontWeight: '800',
-    marginLeft: 4,
+    fontWeight: '600',
   },
   infoBanner: {
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   infoBannerText: {
-    color: '#94a3b8',
+    color: '#71717A',
     fontSize: 11,
     lineHeight: 15,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 96,
+    flex: 1,
   },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 48,
+    gap: 8,
   },
   emptyTitle: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 4,
   },
   emptySubtitle: {
-    color: '#64748b',
+    color: '#71717A',
     fontSize: 12,
-    marginTop: 4,
     textAlign: 'center',
     maxWidth: 280,
+    lineHeight: 17,
   },
   modalOverlay: {
     flex: 1,
@@ -487,75 +637,64 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#181534',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 20,
-    borderTopWidth: 1.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.18)',
-    maxHeight: '90%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
   },
   modalTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   modalTitle: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
-    marginLeft: 8,
+    fontSize: 16,
+    fontWeight: '600',
   },
   closeBtn: {
-    padding: 6,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   formLabel: {
-    color: '#cbd5e1',
+    color: '#A1A1AA',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     marginBottom: 6,
     marginTop: 12,
   },
   formInput: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: '#ffffff',
-    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   chip: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  chipActive: {
-    borderColor: '#38bdf8',
-    backgroundColor: 'rgba(56, 189, 248, 0.2)',
   },
   chipText: {
-    color: '#94a3b8',
     fontSize: 11,
-    fontWeight: '600',
-  },
-  chipTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
   },
   urgencyRow: {
     flexDirection: 'row',
@@ -567,55 +706,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  urgencyBtnActive: {
-    borderColor: '#f97316',
-    backgroundColor: 'rgba(249, 115, 22, 0.2)',
   },
   urgencyBtnText: {
-    color: '#94a3b8',
     fontSize: 12,
-    fontWeight: '600',
-  },
-  urgencyBtnTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
   },
   photoUploadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.3)',
     borderStyle: 'dashed',
-    paddingVertical: 14,
+    paddingVertical: 12,
+    gap: 8,
   },
   photoUploadText: {
-    color: '#38bdf8',
-    fontSize: 13,
-    fontWeight: '600',
-    marginLeft: 8,
+    color: '#A1A1AA',
+    fontSize: 12,
+    fontWeight: '500',
   },
   modalSubmitBtn: {
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  modalSubmitGradient: {
-    flexDirection: 'row',
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    height: 50,
+    marginTop: 20,
   },
   modalSubmitText: {
-    color: '#ffffff',
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '600',
   },
 });

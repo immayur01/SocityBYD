@@ -64,10 +64,10 @@ export const DishCard: React.FC<DishCardProps> = ({ dish, onOrderPress }) => {
           <View
             style={[
               styles.flatPill,
-              { backgroundColor: tokens.bgPill },
+              { backgroundColor: tokens.bgPill, borderColor: tokens.borderSubtle, borderWidth: 1 },
             ]}
           >
-            <Text style={[styles.flatText, { color: tokens.accentPurple }]}>
+            <Text style={[styles.flatText, { color: tokens.textSecondary }]}>
               {dish.chef ? `${dish.chef.wing?.replace('Wing ', '')}-${dish.chef.flat_number}` : 'C-304'}
             </Text>
           </View>
@@ -92,11 +92,16 @@ export const DishCard: React.FC<DishCardProps> = ({ dish, onOrderPress }) => {
           </View>
 
           <TouchableOpacity
-            style={styles.orderButton}
+            style={[
+              styles.orderButton,
+              {
+                backgroundColor: tokens.textPrimary,
+              },
+            ]}
             onPress={() => onOrderPress(dish)}
             activeOpacity={0.8}
           >
-            <Text style={styles.orderButtonText}>Order Meal</Text>
+            <Text style={[styles.orderButtonText, { color: tokens.bgApp }]}>Order Meal</Text>
           </TouchableOpacity>
         </View>
       </View>

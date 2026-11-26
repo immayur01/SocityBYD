@@ -227,6 +227,12 @@ export function IntroSplash({ onFinish, forcePlay = false }: IntroSplashProps) {
       } catch {}
     }
 
+    // Safety fallback: guaranteed overlay unmount within 3.2s
+    const safetyTimer = setTimeout(() => {
+      setVisible(false);
+      onFinish?.();
+    }, 3200);
+
     // 1. Stroke draw & pop-in animations
     step1.value = withDelay(100, withTiming(1, { duration: 650, easing: DRAW_EASING }));
     step2.value = withDelay(280, withTiming(1, { duration: 400, easing: POP_EASING }));
@@ -266,6 +272,10 @@ export function IntroSplash({ onFinish, forcePlay = false }: IntroSplashProps) {
         }
       })
     );
+
+    return () => {
+      clearTimeout(safetyTimer);
+    };
   }, []);
 
   const handleAnimationComplete = () => {
@@ -281,7 +291,7 @@ export function IntroSplash({ onFinish, forcePlay = false }: IntroSplashProps) {
   return (
     <Animated.View
       style={[styles.overlay, overlayAnimatedStyle]}
-      pointerEvents="auto"
+      pointerEvents="none"
     >
       <Animated.View style={[styles.logoContainer, logoScaleStyle]}>
         {/* ================= GROUP: dir-up ================= */}

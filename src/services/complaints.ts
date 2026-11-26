@@ -6,11 +6,30 @@ import {
   ComplaintUrgency,
 } from '@/types';
 import { INITIAL_COMPLAINTS, CURRENT_USER } from './mockData';
+import { uploadMediaToR2 } from './storage';
+import { getAuthenticatedUserId } from './auth';
+
+function detectMimeType(uri: string): string {
+  const clean = uri.toLowerCase().split('?')[0];
+  if (clean.endsWith('.pdf')) return 'application/pdf';
+  if (clean.endsWith('.mp4')) return 'video/mp4';
+  if (clean.endsWith('.mov')) return 'video/quicktime';
+  if (clean.endsWith('.png')) return 'image/png';
+  if (clean.endsWith('.webp')) return 'image/webp';
+  if (clean.endsWith('.heic')) return 'image/heic';
+  return 'image/jpeg';
+}
 
 let localComplaints: Complaint[] = [...INITIAL_COMPLAINTS];
 
 export const complaintsService = {
-  async getComplaints(visibility: ComplaintVisibility): Promise<Complaint[]> {
+  async getComplaints(
+    visibility: ComplaintVisibility,
+    options?: { before?: string; limit?: number }
+  ): Promise<{ complaints: Complaint[]; nextCursor: string | null }> {
+    const limit = options?.limit || 20;
+    const before = options?.before;
+
     if (isSupabaseConfigured) {
       try {
         let query = supabase
@@ -18,20 +37,28 @@ export const complaintsService = {
           .select('*, user:profiles(*)')
           .eq('visibility', visibility)
           .order('upvotes_count', { ascending: false })
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
 
         if (visibility === 'admin') {
           query = query.eq('user_id', CURRENT_USER.id);
         }
 
+        if (before) {
+          query = query.lt('created_at', before);
+        }
+
         const { data, error } = await query;
-        if (!error && data) return data;
+        if (!error && data) {
+          const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
+          return { complaints: data, nextCursor };
+        }
       } catch {
         // fallback
       }
     }
 
-    return localComplaints
+    let filtered = localComplaints
       .filter((c) => {
         if (visibility === 'admin') {
           return c.visibility === 'admin' && c.user_id === CURRENT_USER.id;
@@ -39,6 +66,19 @@ export const complaintsService = {
         return c.visibility === 'public';
       })
       .sort((a, b) => b.upvotes_count - a.upvotes_count);
+
+    if (before) {
+      filtered = filtered.filter((c) => new Date(c.created_at) < new Date(before));
+    }
+
+    const page = filtered.slice(0, limit);
+    const nextCursor = filtered.length > limit ? page[page.length - 1].created_at : null;
+    return { complaints: page, nextCursor };
+  },
+
+  async getAllComplaintsFlat(visibility: ComplaintVisibility): Promise<Complaint[]> {
+    const { complaints } = await this.getComplaints(visibility, { limit: 100 });
+    return complaints;
   },
 
   async fileComplaint(params: {
@@ -49,16 +89,44 @@ export const complaintsService = {
     description: string;
     mediaUrl?: string;
   }): Promise<Complaint> {
+    const userId = await getAuthenticatedUserId();
+
+    let finalMediaUrl = params.mediaUrl;
+    if (params.mediaUrl && !params.mediaUrl.startsWith('http')) {
+      const mime = detectMimeType(params.mediaUrl);
+      finalMediaUrl = await uploadMediaToR2(params.mediaUrl, 'complaints', mime);
+    }
+
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('complaints')
+        .insert({
+          user_id: userId,
+          visibility: params.visibility,
+          category: params.category,
+          urgency: params.urgency,
+          title: params.title,
+          description: params.description,
+          media_url: finalMediaUrl || null,
+          status: 'Open',
+        })
+        .select('*, user:profiles(*)')
+        .single();
+
+      if (error) throw new Error(`Failed to file complaint: ${error.message}`);
+      if (data) return { ...data, is_upvoted: false };
+    }
+
     const now = new Date().toISOString();
     const newComplaint: Complaint = {
       id: `comp-${Date.now()}`,
-      user_id: CURRENT_USER.id,
+      user_id: userId || CURRENT_USER.id,
       visibility: params.visibility,
       category: params.category,
       urgency: params.urgency,
       title: params.title,
       description: params.description,
-      media_url: params.mediaUrl,
+      media_url: finalMediaUrl,
       status: 'Open',
       admin_note: undefined,
       upvotes_count: 0,
@@ -68,20 +136,29 @@ export const complaintsService = {
       user: CURRENT_USER,
     };
 
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.from('complaints').insert(newComplaint).select().single();
-        if (!error && data) return { ...data, user: CURRENT_USER };
-      } catch {
-        // fallback
-      }
-    }
-
     localComplaints = [newComplaint, ...localComplaints];
     return newComplaint;
   },
 
   async toggleUpvote(complaintId: string): Promise<{ isUpvoted: boolean; count: number }> {
+    const userId = await getAuthenticatedUserId();
+
+    if (isSupabaseConfigured) {
+      const { data: isNowUpvoted, error: rpcError } = await supabase.rpc('toggle_complaint_upvote', {
+        p_complaint_id: complaintId,
+        p_user_id: userId,
+      });
+
+      if (rpcError) throw new Error(`Upvote failed: ${rpcError.message}`);
+
+      const { count } = await supabase
+        .from('complaint_upvotes')
+        .select('*', { count: 'exact', head: true })
+        .eq('complaint_id', complaintId);
+
+      return { isUpvoted: Boolean(isNowUpvoted), count: count ?? 0 };
+    }
+
     const compIndex = localComplaints.findIndex((c) => c.id === complaintId);
     if (compIndex === -1) return { isUpvoted: false, count: 0 };
 
@@ -94,17 +171,6 @@ export const complaintsService = {
       is_upvoted: newIsUpvoted,
       upvotes_count: newCount,
     };
-
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.rpc('toggle_complaint_upvote', {
-          p_complaint_id: complaintId,
-          p_user_id: CURRENT_USER.id,
-        });
-      } catch {
-        // fallback
-      }
-    }
 
     return { isUpvoted: newIsUpvoted, count: newCount };
   },

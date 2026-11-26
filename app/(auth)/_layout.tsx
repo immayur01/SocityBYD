@@ -7,10 +7,11 @@ export default function AuthLayout() {
       screenOptions={{
         headerShown: false,
         animation: 'fade',
-        contentStyle: { backgroundColor: '#080813' },
+        contentStyle: { backgroundColor: '#000000' },
       }}
     >
       <Stack.Screen name="login" />
+      <Stack.Screen name="complete-profile" />
       <Stack.Screen
         name="otp"
         options={{

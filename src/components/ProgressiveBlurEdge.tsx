@@ -26,6 +26,24 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+// Fallback boundary to prevent native MaskedView/BlurView crashes from taking down tabs
+class SafeMaskedBlurBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(err: any) {
+    console.warn('[ProgressiveBlurEdge] Fallback rendered due to:', err);
+  }
+  render() {
+    if (this.state.hasError) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
 export function ProgressiveBlurEdge({
   position,
   height,
@@ -60,6 +78,33 @@ export function ProgressiveBlurEdge({
     ? [hexToRgba(bgColor, 0.4), hexToRgba(bgColor, 0)]
     : [hexToRgba(bgColor, 0), hexToRgba(bgColor, 0.55)];
 
+  const fallbackGradient = (
+    <LinearGradient
+      colors={
+        isTop
+          ? [hexToRgba(bgColor, 0.7), hexToRgba(bgColor, 0)]
+          : [hexToRgba(bgColor, 0), hexToRgba(bgColor, 0.7)]
+      }
+      style={StyleSheet.absoluteFill}
+    />
+  );
+
+  if (Platform.OS === 'android') {
+    return (
+      <View
+        pointerEvents="none"
+        style={[
+          styles.container,
+          { height },
+          isTop ? styles.top : styles.bottom,
+          style,
+        ]}
+      >
+        {fallbackGradient}
+      </View>
+    );
+  }
+
   return (
     <View
       pointerEvents="none"
@@ -70,29 +115,31 @@ export function ProgressiveBlurEdge({
         style,
       ]}
     >
-      <MaskedView
-        style={StyleSheet.absoluteFill}
-        maskElement={
-          <LinearGradient
-            colors={maskColors}
-            locations={maskLocations}
+      <SafeMaskedBlurBoundary fallback={fallbackGradient}>
+        <MaskedView
+          style={StyleSheet.absoluteFill}
+          maskElement={
+            <LinearGradient
+              colors={maskColors}
+              locations={maskLocations}
+              style={StyleSheet.absoluteFill}
+            />
+          }
+        >
+          <BlurView
+            key={isDark ? `${position}-dock-dark` : `${position}-dock-light`}
+            intensity={35}
+            blurReductionFactor={1}
+            tint={tint}
+            experimentalBlurMethod="dimezisBlurView"
             style={StyleSheet.absoluteFill}
           />
-        }
-      >
-        <BlurView
-          key={isDark ? `${position}-dock-dark` : `${position}-dock-light`}
-          intensity={Platform.OS === 'android' ? 24 : 35}
-          blurReductionFactor={1}
-          tint={tint}
-          experimentalBlurMethod="dimezisBlurView"
-          style={StyleSheet.absoluteFill}
-        />
-        <LinearGradient
-          colors={tintColors}
-          style={StyleSheet.absoluteFill}
-        />
-      </MaskedView>
+          <LinearGradient
+            colors={tintColors}
+            style={StyleSheet.absoluteFill}
+          />
+        </MaskedView>
+      </SafeMaskedBlurBoundary>
     </View>
   );
 }

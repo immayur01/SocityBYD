@@ -11,7 +11,6 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import {
   Mail,
   Phone,
@@ -22,15 +21,19 @@ import {
   Check,
   ChevronDown,
   ArrowRight,
-  ShieldCheck,
 } from 'lucide-react-native';
 import { GlassCard } from '@/components/GlassCard';
 import { GlassInput } from '@/components/GlassInput';
 import { ShimmerTitle } from '@/components/ShimmerTitle';
 import { useAuth } from '@/context/AuthContext';
-import { useToast } from '@/context/ToastContext';
+import { island } from '@/context/IslandContext';
+import { useTheme } from '@/context/ThemeContext';
 import { WingCode } from '@/types';
+import { isSupabaseConfigured } from '@/services/supabase';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const WINGS: WingCode[] = [
   'Wing A',
@@ -49,8 +52,14 @@ const WINGS: WingCode[] = [
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signInWithEmail, signInWithPhone, signInWithGoogle, requestRegistrationOtp } = useAuth();
-  const { showToast } = useToast();
+  const { tokens, isDark } = useTheme();
+  const {
+    signInWithEmail,
+    signInWithPhone,
+    signInWithGoogle,
+    requestRegistrationOtp,
+    requestPhoneOtp,
+  } = useAuth();
 
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [signInMethod, setSignInMethod] = useState<'email' | 'phone'>('email');
@@ -78,29 +87,55 @@ export default function LoginScreen() {
 
     if (signInMethod === 'email') {
       if (!signInEmail || !signInEmail.includes('@')) {
-        showToast('Validation Error', 'Please enter a valid email address.', 'error');
+        island.error('Validation Error', 'Please enter a valid email address.');
         return;
       }
     } else {
       if (!signInPhone || signInPhone.length < 10) {
-        showToast('Validation Error', 'Please enter a valid 10-digit phone number.', 'error');
+        island.error('Validation Error', 'Please enter a valid 10-digit phone number.');
         return;
       }
     }
 
     if (!signInPassword) {
-      showToast('Validation Error', 'Please enter your password.', 'error');
+      island.error('Validation Error', 'Please enter your password.');
       return;
     }
 
     try {
       setSubmitting(true);
       if (signInMethod === 'email') {
+        if (!signInPassword) {
+          island.error('Validation Error', 'Please enter your password.');
+          return;
+        }
         await signInWithEmail(signInEmail, signInPassword, rememberDevice);
+        router.replace('/(tabs)/feed');
       } else {
-        await signInWithPhone(signInPhone, signInPassword, rememberDevice);
+        const cleanPhone = signInPhone.replace(/[^0-9]/g, '');
+        if (cleanPhone.length !== 10) {
+          island.error('Validation Error', 'Please enter a valid 10-digit Indian mobile number.');
+          return;
+        }
+        if (isSupabaseConfigured) {
+          await requestPhoneOtp(cleanPhone);
+          router.push({
+            pathname: '/(auth)/otp',
+            params: { targetPhone: cleanPhone },
+          });
+        } else {
+          if (signInPassword) {
+            await signInWithPhone(cleanPhone, signInPassword, rememberDevice);
+            router.replace('/(tabs)/feed');
+          } else {
+            await requestPhoneOtp(cleanPhone);
+            router.push({
+              pathname: '/(auth)/otp',
+              params: { targetPhone: cleanPhone },
+            });
+          }
+        }
       }
-      router.replace('/(tabs)/feed');
     } catch {
       // toast shown in context
     } finally {
@@ -112,8 +147,12 @@ export default function LoginScreen() {
     if (submitting) return;
     try {
       setSubmitting(true);
-      await signInWithGoogle();
-      router.replace('/(tabs)/feed');
+      const { isNewOrIncomplete } = await signInWithGoogle();
+      if (isNewOrIncomplete) {
+        router.replace('/(auth)/complete-profile');
+      } else {
+        router.replace('/(tabs)/feed');
+      }
     } catch {
       // handled
     } finally {
@@ -125,28 +164,28 @@ export default function LoginScreen() {
     if (submitting) return;
 
     if (!fullName.trim()) {
-      showToast('Validation Error', 'Please enter your full name as per society records.', 'error');
+      island.error('Validation Error', 'Please enter your full name as per society records.');
       return;
     }
     if (!flatNumber.trim()) {
-      showToast('Validation Error', 'Please enter your flat number (e.g. 402).', 'error');
+      island.error('Validation Error', 'Please enter your flat number (e.g. 402).');
       return;
     }
     const cleanPhone = signUpPhone.replace(/[^0-9]/g, '');
     if (cleanPhone.length !== 10) {
-      showToast('Validation Error', 'Please enter a valid 10-digit Indian mobile number.', 'error');
+      island.error('Validation Error', 'Please enter a valid 10-digit Indian mobile number.');
       return;
     }
     if (!signUpEmail || !signUpEmail.includes('@')) {
-      showToast('Validation Error', 'Please enter a valid email address.', 'error');
+      island.error('Validation Error', 'Please enter a valid email address.');
       return;
     }
     if (!signUpPassword || signUpPassword.length < 8) {
-      showToast('Validation Error', 'Password must be at least 8 characters long.', 'error');
+      island.error('Validation Error', 'Password must be at least 8 characters long.');
       return;
     }
     if (!agreeTerms) {
-      showToast('Validation Error', 'You must agree to society rules and privacy policy.', 'error');
+      island.error('Validation Error', 'You must agree to society rules and privacy policy.');
       return;
     }
 
@@ -177,56 +216,83 @@ export default function LoginScreen() {
   };
 
   return (
-    <LinearGradient
-      colors={['#0D1120', '#13122B', '#090D16']}
-      start={{ x: 0.1, y: 0 }}
-      end={{ x: 0.9, y: 1 }}
-      style={styles.container}
-    >
-      {/* Ambient background glow orbs */}
-      <View style={[styles.glowOrb, styles.glowOrb1]} />
-      <View style={[styles.glowOrb, styles.glowOrb2]} />
-
+    <View style={[styles.container, { backgroundColor: tokens.bgApp }]}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <GlassCard style={styles.card}>
-          {/* Header: Shimmer Title only (no logo) */}
+          {/* Header */}
           <View style={styles.headerArea}>
             <ShimmerTitle
-              fontSize={21}
-              letterSpacing={2}
-              subtitle="Premier Resident Portal & Community Hub"
+              fontSize={20}
+              letterSpacing={1.5}
+              subtitle="Sign in to your flat account"
               align="center"
             />
           </View>
 
           {/* Segmented Tab Switcher: Sign In vs Sign Up */}
-          <View style={styles.modeSwitcher}>
+          <View
+            style={[
+              styles.modeSwitcher,
+              {
+                backgroundColor: isDark ? '#141414' : '#F4F4F5',
+                borderColor: tokens.borderSubtle,
+              },
+            ]}
+          >
             <TouchableOpacity
-              style={[styles.modeTab, authMode === 'signin' && styles.modeTabActive]}
+              style={[
+                styles.modeTab,
+                authMode === 'signin' && [
+                  styles.modeTabActive,
+                  {
+                    backgroundColor: isDark ? '#222222' : '#FFFFFF',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ],
+              ]}
               onPress={() => {
                 if (Platform.OS !== 'web') Haptics.selectionAsync();
                 setAuthMode('signin');
               }}
               activeOpacity={0.8}
             >
-              <Text style={[styles.modeTabText, authMode === 'signin' && styles.modeTabTextActive]}>
+              <Text
+                style={[
+                  styles.modeTabText,
+                  { color: authMode === 'signin' ? tokens.textPrimary : tokens.textSecondary },
+                ]}
+              >
                 Sign In
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.modeTab, authMode === 'signup' && styles.modeTabActive]}
+              style={[
+                styles.modeTab,
+                authMode === 'signup' && [
+                  styles.modeTabActive,
+                  {
+                    backgroundColor: isDark ? '#222222' : '#FFFFFF',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ],
+              ]}
               onPress={() => {
                 if (Platform.OS !== 'web') Haptics.selectionAsync();
                 setAuthMode('signup');
               }}
               activeOpacity={0.8}
             >
-              <Text style={[styles.modeTabText, authMode === 'signup' && styles.modeTabTextActive]}>
+              <Text
+                style={[
+                  styles.modeTabText,
+                  { color: authMode === 'signup' ? tokens.textPrimary : tokens.textSecondary },
+                ]}
+              >
                 Sign Up (New Resident)
               </Text>
             </TouchableOpacity>
@@ -235,7 +301,6 @@ export default function LoginScreen() {
           {/* ===================== SIGN IN VIEW ===================== */}
           {authMode === 'signin' ? (
             <View style={styles.formContainer}>
-              {/* Email or Phone Input (driven by circular button selection below) */}
               {signInMethod === 'email' ? (
                 <GlassInput
                   label="Registered Email"
@@ -244,7 +309,7 @@ export default function LoginScreen() {
                   onChangeText={setSignInEmail}
                   keyboardType="email-address"
                   autoCapitalize="none"
-                  leftIcon={<Mail size={18} color="#94a3b8" />}
+                  leftIcon={<Mail size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
                 />
               ) : (
                 <GlassInput
@@ -255,7 +320,9 @@ export default function LoginScreen() {
                   keyboardType="phone-pad"
                   leftIcon={
                     <View style={styles.countryCodeBadge}>
-                      <Text style={styles.countryCodeText}>+91</Text>
+                      <Text style={[styles.countryCodeText, { color: tokens.textSecondary }]}>
+                        +91
+                      </Text>
                     </View>
                   }
                 />
@@ -268,7 +335,7 @@ export default function LoginScreen() {
                 value={signInPassword}
                 onChangeText={setSignInPassword}
                 isPassword
-                leftIcon={<Lock size={18} color="#94a3b8" />}
+                leftIcon={<Lock size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
               />
 
               {/* Remember device + Forgot Password */}
@@ -277,111 +344,109 @@ export default function LoginScreen() {
                   <Switch
                     value={rememberDevice}
                     onValueChange={setRememberDevice}
-                    trackColor={{ false: '#334155', true: '#7c3aed' }}
-                    thumbColor={rememberDevice ? '#ffffff' : '#94a3b8'}
+                    trackColor={{
+                      false: isDark ? '#262626' : '#E4E4E7',
+                      true: isDark ? '#FFFFFF' : '#111111',
+                    }}
+                    thumbColor={
+                      rememberDevice
+                        ? (isDark ? '#000000' : '#FFFFFF')
+                        : (isDark ? '#71717A' : '#A1A1AA')
+                    }
                   />
-                  <Text style={styles.rememberText}>Remember this device</Text>
+                  <Text style={[styles.rememberText, { color: tokens.textSecondary }]}>
+                    Remember this device
+                  </Text>
                 </View>
 
                 <TouchableOpacity
                   onPress={() =>
-                    showToast(
+                    island.info(
                       'Password Reset',
-                      'Please contact society admin Rajesh Sharma (Wing A-101) to reset your passkey.',
-                      'info'
+                      'Please contact society admin Rajesh Sharma (Wing A-101) to reset your passkey.'
                     )
                   }
                 >
-                  <Text style={styles.forgotText}>Forgot password?</Text>
+                  <Text style={[styles.forgotText, { color: tokens.textSecondary }]}>
+                    Forgot password?
+                  </Text>
                 </TouchableOpacity>
               </View>
 
               {/* Primary Sign In CTA */}
               <TouchableOpacity
-                style={styles.primaryCta}
+                style={[
+                  styles.primaryCta,
+                  { backgroundColor: isDark ? '#F5F5F5' : '#111111' },
+                ]}
                 onPress={handleSignIn}
                 activeOpacity={0.85}
                 disabled={submitting}
               >
-                <LinearGradient
-                  colors={['#7c3aed', '#ec4899', '#f59e0b']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.ctaGradient}
+                <Text
+                  style={[
+                    styles.ctaText,
+                    { color: isDark ? '#000000' : '#FFFFFF' },
+                  ]}
                 >
-                  <Text style={styles.ctaText}>
-                    {submitting ? 'Authenticating...' : 'Sign In to Ashtavinayak Empire'}
-                  </Text>
-                  <ArrowRight size={18} color="#ffffff" />
-                </LinearGradient>
+                  {submitting ? 'Signing in...' : 'Sign In'}
+                </Text>
+                <ArrowRight
+                  size={16}
+                  strokeWidth={1.5}
+                  color={isDark ? '#000000' : '#FFFFFF'}
+                />
               </TouchableOpacity>
 
               {/* OR divider */}
               <View style={styles.orDividerRow}>
-                <View style={styles.orDividerLine} />
-                <Text style={styles.orDividerText}>OR SIGN IN WITH</Text>
-                <View style={styles.orDividerLine} />
+                <View style={[styles.orDividerLine, { backgroundColor: tokens.borderSubtle }]} />
+                <Text style={[styles.orDividerText, { color: tokens.textMuted }]}>
+                  OR SIGN IN WITH
+                </Text>
+                <View style={[styles.orDividerLine, { backgroundColor: tokens.borderSubtle }]} />
               </View>
 
-              {/* Circular social / method buttons */}
+              {/* Secondary Sign-In Options (Google and Phone toggle) */}
               <View style={styles.socialButtonsRow}>
-                {/* Google */}
                 <TouchableOpacity
-                  style={styles.socialCircleBtn}
+                  style={[
+                    styles.secondaryMethodBtn,
+                    {
+                      backgroundColor: isDark ? '#161616' : '#FAFAFA',
+                      borderColor: tokens.borderSubtle,
+                    },
+                  ]}
                   onPress={handleGoogleSignIn}
                   activeOpacity={0.8}
                 >
-                  <View style={[styles.socialCircleInner, styles.socialCircleGoogle]}>
-                    <Text style={styles.googleGText}>G</Text>
-                  </View>
-                  <Text style={styles.socialCircleLabel}>Google</Text>
-                </TouchableOpacity>
-
-                {/* Email */}
-                <TouchableOpacity
-                  style={styles.socialCircleBtn}
-                  onPress={() => {
-                    if (Platform.OS !== 'web') Haptics.selectionAsync();
-                    setSignInMethod('email');
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <View style={[
-                    styles.socialCircleInner,
-                    styles.socialCirclePurple,
-                    signInMethod === 'email' && styles.socialCircleActive,
-                  ]}>
-                    <Mail size={22} color="#ffffff" />
-                  </View>
-                  <Text style={[
-                    styles.socialCircleLabel,
-                    signInMethod === 'email' && styles.socialCircleLabelActive,
-                  ]}>
-                    Email
+                  <Text style={styles.googleGText}>G</Text>
+                  <Text style={[styles.secondaryMethodLabel, { color: tokens.textPrimary }]}>
+                    Google
                   </Text>
                 </TouchableOpacity>
 
-                {/* Phone */}
                 <TouchableOpacity
-                  style={styles.socialCircleBtn}
+                  style={[
+                    styles.secondaryMethodBtn,
+                    {
+                      backgroundColor: isDark ? '#161616' : '#FAFAFA',
+                      borderColor: tokens.borderSubtle,
+                    },
+                  ]}
                   onPress={() => {
                     if (Platform.OS !== 'web') Haptics.selectionAsync();
-                    setSignInMethod('phone');
+                    setSignInMethod((prev) => (prev === 'phone' ? 'email' : 'phone'));
                   }}
                   activeOpacity={0.8}
                 >
-                  <View style={[
-                    styles.socialCircleInner,
-                    styles.socialCirclePurple,
-                    signInMethod === 'phone' && styles.socialCircleActive,
-                  ]}>
-                    <Phone size={22} color="#ffffff" />
-                  </View>
-                  <Text style={[
-                    styles.socialCircleLabel,
-                    signInMethod === 'phone' && styles.socialCircleLabelActive,
-                  ]}>
-                    Phone
+                  {signInMethod === 'phone' ? (
+                    <Mail size={16} strokeWidth={1.5} color={tokens.textPrimary} />
+                  ) : (
+                    <Phone size={16} strokeWidth={1.5} color={tokens.textPrimary} />
+                  )}
+                  <Text style={[styles.secondaryMethodLabel, { color: tokens.textPrimary }]}>
+                    {signInMethod === 'phone' ? 'Use Email' : 'Phone'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -392,24 +457,34 @@ export default function LoginScreen() {
               {/* Full Name */}
               <GlassInput
                 label="Full Name"
-                placeholder="As on your society records"
+                placeholder="As on society records"
                 value={fullName}
                 onChangeText={setFullName}
-                leftIcon={<User size={18} color="#94a3b8" />}
+                leftIcon={<User size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
               />
 
               {/* 2-Column: Wing Picker + Flat Number */}
               <View style={styles.twoColRow}>
                 <View style={[styles.colItem, { marginRight: 8 }]}>
-                  <Text style={styles.inputLabel}>Society Wing</Text>
+                  <Text style={[styles.inputLabel, { color: tokens.textSecondary }]}>
+                    Society Wing
+                  </Text>
                   <TouchableOpacity
-                    style={styles.wingSelectorButton}
+                    style={[
+                      styles.wingSelectorButton,
+                      {
+                        backgroundColor: isDark ? '#141414' : '#F4F4F5',
+                        borderColor: tokens.borderSubtle,
+                      },
+                    ]}
                     onPress={() => setShowWingModal(true)}
                     activeOpacity={0.8}
                   >
-                    <Building2 size={16} color="#c084fc" />
-                    <Text style={styles.wingSelectedText}>{selectedWing}</Text>
-                    <ChevronDown size={16} color="#94a3b8" />
+                    <Building2 size={16} strokeWidth={1.5} color={tokens.textSecondary} />
+                    <Text style={[styles.wingSelectedText, { color: tokens.textPrimary }]}>
+                      {selectedWing}
+                    </Text>
+                    <ChevronDown size={16} strokeWidth={1.5} color={tokens.textSecondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -420,7 +495,7 @@ export default function LoginScreen() {
                     value={flatNumber}
                     onChangeText={setFlatNumber}
                     keyboardType="number-pad"
-                    leftIcon={<Home size={16} color="#94a3b8" />}
+                    leftIcon={<Home size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
                     containerStyle={{ marginBottom: 0 }}
                   />
                 </View>
@@ -429,7 +504,7 @@ export default function LoginScreen() {
               {/* Mobile Number with +91 prefix */}
               <View style={{ marginTop: 14 }}>
                 <GlassInput
-                  label="Mobile Number (for OTP verification)"
+                  label="Mobile Number (for verification code)"
                   placeholder="98765 43210"
                   value={signUpPhone}
                   onChangeText={setSignUpPhone}
@@ -437,7 +512,9 @@ export default function LoginScreen() {
                   maxLength={10}
                   leftIcon={
                     <View style={styles.countryCodeBadge}>
-                      <Text style={styles.countryCodeText}>+91</Text>
+                      <Text style={[styles.countryCodeText, { color: tokens.textSecondary }]}>
+                        +91
+                      </Text>
                     </View>
                   }
                 />
@@ -451,7 +528,7 @@ export default function LoginScreen() {
                 onChangeText={setSignUpEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
-                leftIcon={<Mail size={18} color="#94a3b8" />}
+                leftIcon={<Mail size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
               />
 
               {/* Create Password */}
@@ -461,7 +538,7 @@ export default function LoginScreen() {
                 value={signUpPassword}
                 onChangeText={setSignUpPassword}
                 isPassword
-                leftIcon={<Lock size={18} color="#94a3b8" />}
+                leftIcon={<Lock size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
               />
 
               {/* Agreement Checkbox */}
@@ -470,121 +547,154 @@ export default function LoginScreen() {
                 onPress={() => setAgreeTerms((prev) => !prev)}
                 activeOpacity={0.8}
               >
-                <View style={[styles.checkbox, agreeTerms && styles.checkboxActive]}>
-                  {agreeTerms && <Check size={14} color="#ffffff" />}
+                <View
+                  style={[
+                    styles.checkbox,
+                    {
+                      borderColor: agreeTerms
+                        ? (isDark ? '#F5F5F5' : '#111111')
+                        : tokens.borderSubtle,
+                      backgroundColor: agreeTerms
+                        ? (isDark ? '#F5F5F5' : '#111111')
+                        : 'transparent',
+                    },
+                  ]}
+                >
+                  {agreeTerms && (
+                    <Check
+                      size={12}
+                      strokeWidth={2}
+                      color={isDark ? '#000000' : '#FFFFFF'}
+                    />
+                  )}
                 </View>
-                <Text style={styles.checkboxLabel}>
+                <Text style={[styles.checkboxLabel, { color: tokens.textSecondary }]}>
                   I agree to the society rules and privacy policy.
                 </Text>
               </TouchableOpacity>
 
               {/* Sign Up Primary CTA */}
               <TouchableOpacity
-                style={styles.primaryCta}
+                style={[
+                  styles.primaryCta,
+                  { backgroundColor: isDark ? '#F5F5F5' : '#111111' },
+                ]}
                 onPress={handleSignUp}
                 activeOpacity={0.85}
                 disabled={submitting}
               >
-                <LinearGradient
-                  colors={['#7c3aed', '#ec4899', '#f59e0b']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.ctaGradient}
+                <Text
+                  style={[
+                    styles.ctaText,
+                    { color: isDark ? '#000000' : '#FFFFFF' },
+                  ]}
                 >
-                  <Text style={styles.ctaText}>
-                    {submitting ? 'Sending OTP...' : 'Send verification code →'}
-                  </Text>
-                </LinearGradient>
+                  {submitting ? 'Sending code...' : 'Send verification code'}
+                </Text>
+                <ArrowRight
+                  size={16}
+                  strokeWidth={1.5}
+                  color={isDark ? '#000000' : '#FFFFFF'}
+                />
               </TouchableOpacity>
             </View>
           )}
-
-          {/* Secure Portal Footer */}
-          <View style={styles.cardFooter}>
-            <ShieldCheck size={14} color="#10b981" />
-            <Text style={styles.footerText}>
-              Verified Resident Access • Ashtavinayak Empire Co-op Housing Society
-            </Text>
-          </View>
         </GlassCard>
       </ScrollView>
 
       {/* Wing Picker Modal */}
-      <Modal visible={showWingModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select Your Wing</Text>
-            <FlatList
-              data={WINGS}
-              keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.wingModalItem,
-                    item === selectedWing && styles.wingModalItemActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedWing(item);
-                    setShowWingModal(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.wingModalText,
-                      item === selectedWing && styles.wingModalTextActive,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                  {item === selectedWing && <Check size={18} color="#c084fc" />}
-                </TouchableOpacity>
-              )}
-            />
-            <TouchableOpacity
-              style={styles.modalCloseBtn}
-              onPress={() => setShowWingModal(false)}
+      {showWingModal && (
+        <Modal
+          visible={true}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowWingModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: tokens.bgCard,
+                  borderColor: tokens.borderSubtle,
+                },
+              ]}
             >
-              <Text style={styles.modalCloseText}>Cancel</Text>
-            </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: tokens.textPrimary }]}>
+                Select Wing
+              </Text>
+              <FlatList
+                data={WINGS}
+                keyExtractor={(item) => item}
+                renderItem={({ item }) => {
+                  const isSelected = item === selectedWing;
+                  return (
+                    <TouchableOpacity
+                      style={[
+                        styles.wingModalItem,
+                        isSelected && {
+                          backgroundColor: isDark ? '#1C1C1C' : '#F4F4F5',
+                          borderWidth: 1,
+                          borderColor: tokens.borderSubtle,
+                        },
+                      ]}
+                      onPress={() => {
+                        setSelectedWing(item);
+                        setShowWingModal(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.wingModalText,
+                          {
+                            color: isSelected ? tokens.textPrimary : tokens.textSecondary,
+                            fontWeight: isSelected ? '600' : '400',
+                          },
+                        ]}
+                      >
+                        {item}
+                      </Text>
+                      {isSelected && (
+                        <Check
+                          size={16}
+                          strokeWidth={1.5}
+                          color={tokens.textPrimary}
+                        />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setShowWingModal(false)}
+              >
+                <Text style={[styles.modalCloseText, { color: tokens.textSecondary }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </LinearGradient>
+        </Modal>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#090D16',
-  },
-  glowOrb: {
-    position: 'absolute',
-    width: 280,
-    height: 280,
-    borderRadius: 140,
-    opacity: 0.22,
-  },
-  glowOrb1: {
-    top: -50,
-    right: -50,
-    backgroundColor: '#7c3aed',
-  },
-  glowOrb2: {
-    bottom: -60,
-    left: -40,
-    backgroundColor: '#ec4899',
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 36,
+    paddingVertical: 32,
     paddingHorizontal: 16,
   },
   card: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 420,
     padding: 24,
   },
   headerArea: {
@@ -593,34 +703,24 @@ const styles = StyleSheet.create({
   },
   modeSwitcher: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderRadius: 14,
-    padding: 4,
+    borderRadius: 8,
+    padding: 3,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   modeTab: {
     flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modeTabActive: {
-    backgroundColor: '#7c3aed',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    borderWidth: 1,
   },
   modeTabText: {
-    color: '#94a3b8',
     fontSize: 12,
-    fontWeight: '700',
-  },
-  modeTabTextActive: {
-    color: '#ffffff',
+    fontWeight: '500',
   },
   formContainer: {
     width: '100%',
@@ -629,9 +729,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   countryCodeText: {
-    color: '#c084fc',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '500',
   },
   optionsRow: {
     flexDirection: 'row',
@@ -644,110 +743,67 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   rememberText: {
-    color: '#94a3b8',
     fontSize: 12,
     marginLeft: 8,
   },
   forgotText: {
-    color: '#c084fc',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   primaryCta: {
     width: '100%',
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginTop: 8,
-    shadowColor: '#ec4899',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  ctaGradient: {
+    borderRadius: 8,
+    height: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52,
-    paddingHorizontal: 16,
+    marginTop: 4,
   },
   ctaText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    marginRight: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 6,
   },
-  // OR divider below CTA
   orDividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 22,
-    marginBottom: 18,
+    marginTop: 20,
+    marginBottom: 16,
   },
   orDividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
   },
   orDividerText: {
-    color: '#64748b',
     fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    marginHorizontal: 10,
+    fontWeight: '500',
+    letterSpacing: 1,
+    marginHorizontal: 12,
   },
-  // Circular social/method buttons row
   socialButtonsRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: 28,
-    marginBottom: 8,
+    gap: 12,
+    marginBottom: 4,
   },
-  socialCircleBtn: {
+  secondaryMethodBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  socialCircleInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
     justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-  },
-  socialCircleGoogle: {
-    backgroundColor: '#ffffff',
-  },
-  socialCirclePurple: {
-    backgroundColor: 'rgba(124, 58, 237, 0.25)',
-  },
-  socialCircleActive: {
-    backgroundColor: 'rgba(124, 58, 237, 0.55)',
-    borderColor: '#c084fc',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 5,
+    gap: 8,
   },
   googleGText: {
-    color: '#ea4335',
-    fontSize: 22,
-    fontWeight: '900',
-  },
-  socialCircleLabel: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  socialCircleLabelActive: {
-    color: '#c084fc',
+    fontSize: 15,
     fontWeight: '700',
+    color: '#EA4335',
   },
-  // Sign Up specific
+  secondaryMethodLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
   twoColRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -757,27 +813,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   inputLabel: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
     marginBottom: 6,
-    letterSpacing: 0.3,
   },
   wingSelectorButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    borderRadius: 14,
+    borderWidth: 1,
+    borderRadius: 8,
     paddingHorizontal: 12,
-    height: 50,
+    height: 44,
   },
   wingSelectedText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
   },
   checkboxRow: {
     flexDirection: 'row',
@@ -785,43 +836,19 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-  },
-  checkboxActive: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
   },
   checkboxLabel: {
-    color: '#94a3b8',
     fontSize: 12,
     flex: 1,
     lineHeight: 16,
   },
-  // Footer
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-    paddingTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  footerText: {
-    color: '#64748b',
-    fontSize: 10,
-    marginLeft: 6,
-    fontWeight: '600',
-  },
-  // Wing Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -831,50 +858,37 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '100%',
-    maxWidth: 360,
-    backgroundColor: '#181534',
-    borderRadius: 20,
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    padding: 20,
-    maxHeight: 450,
+    maxWidth: 340,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    maxHeight: 420,
   },
   modalTitle: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
-    marginBottom: 14,
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
     textAlign: 'center',
   },
   wingModalItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginBottom: 4,
-  },
-  wingModalItemActive: {
-    backgroundColor: 'rgba(124, 58, 237, 0.25)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    marginBottom: 2,
   },
   wingModalText: {
-    color: '#cbd5e1',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  wingModalTextActive: {
-    color: '#ffffff',
-    fontWeight: '800',
+    fontSize: 13,
   },
   modalCloseBtn: {
-    marginTop: 12,
-    paddingVertical: 10,
+    marginTop: 10,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   modalCloseText: {
-    color: '#94a3b8',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });

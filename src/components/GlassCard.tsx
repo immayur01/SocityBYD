@@ -51,35 +51,26 @@ export const GlassCard: React.FC<GlassCardProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
     overflow: 'hidden',
   },
   shadowDark: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    elevation: 6,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   shadowLight: {
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    elevation: 2,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
   },
   glowBorderDark: {
-    borderColor: 'rgba(167, 139, 250, 0.45)',
-    shadowColor: '#7C4DFF',
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
   },
   glowBorderLight: {
-    borderColor: '#7C4DFF',
-    shadowColor: '#7C4DFF',
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
+    borderColor: 'rgba(0, 0, 0, 0.16)',
   },
   content: {
     position: 'relative',

@@ -1,39 +1,35 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { authService } from '@/services/auth';
+import { useAuth } from '@/context/AuthContext';
+import { SpinnerLoader } from '@/components/SpinnerLoader';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 
 export default function RootIndex() {
   const router = useRouter();
+  const { user, session, loading, isAuthenticated, isProfileComplete } = useAuth();
+
+  const isUserAuthenticated = isAuthenticated || Boolean(user || session);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const stored = await authService.getStoredSession();
-        if (!mounted) return;
-        if (stored) {
-          router.replace('/(tabs)/feed');
-        } else {
-          router.replace('/(auth)/login');
-        }
-      } catch {
-        if (!mounted) return;
-        router.replace('/(auth)/login');
+    if (loading) return;
+
+    if (isUserAuthenticated) {
+      if (!isProfileComplete) {
+        router.replace('/(auth)/complete-profile');
+      } else {
+        router.replace('/(tabs)/feed');
       }
-    })();
+    } else {
+      router.replace('/(auth)/login');
+    }
+  }, [loading, isUserAuthenticated, isProfileComplete, router]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [router]);
+  // Session-aware loader:
+  // - If authenticated (or cached session exists) while hydrating: show SkeletonLoader
+  // - If unauthenticated (no active session, or while checking/redirecting to auth): show SpinnerLoader
+  if (isUserAuthenticated) {
+    return <SkeletonLoader variant="shell" />;
+  }
 
-  return <View style={styles.container} />;
+  return <SpinnerLoader size="small" />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#070B14',
-  },
-});

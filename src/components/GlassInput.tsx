@@ -9,7 +9,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { Colors } from '@/theme/colors';
+import { useTheme } from '@/context/ThemeContext';
 
 interface GlassInputProps extends TextInputProps {
   label?: string;
@@ -30,24 +30,38 @@ export const GlassInput: React.FC<GlassInputProps> = ({
 }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const { tokens, isDark } = useTheme();
 
   return (
     <View style={[styles.wrapper, containerStyle]}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && <Text style={[styles.label, { color: tokens.textSecondary }]}>{label}</Text>}
       <View
         style={[
           styles.inputContainer,
-          isFocused && styles.inputFocused,
-          error ? styles.inputError : null,
+          {
+            backgroundColor: isDark ? '#161616' : '#F4F4F5',
+            borderColor: error
+              ? '#ef4444'
+              : isFocused
+              ? isDark
+                ? 'rgba(255, 255, 255, 0.35)'
+                : 'rgba(0, 0, 0, 0.35)'
+              : tokens.borderSubtle,
+          },
         ]}
       >
         {leftIcon && <View style={styles.leftIconContainer}>{leftIcon}</View>}
         <TextInput
-          placeholderTextColor="#64748b"
+          placeholderTextColor={tokens.textMuted}
           secureTextEntry={isPassword && !showPassword}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
-          style={[styles.input, leftIcon ? { paddingLeft: 4 } : null, style]}
+          style={[
+            styles.input,
+            { color: tokens.textPrimary },
+            leftIcon ? { paddingLeft: 4 } : null,
+            style,
+          ]}
           {...props}
         />
         {isPassword && (
@@ -57,9 +71,9 @@ export const GlassInput: React.FC<GlassInputProps> = ({
             activeOpacity={0.7}
           >
             {showPassword ? (
-              <EyeOff size={18} color="#94a3b8" />
+              <EyeOff size={18} color={tokens.textMuted} strokeWidth={1.5} />
             ) : (
-              <Eye size={18} color="#94a3b8" />
+              <Eye size={18} color={tokens.textMuted} strokeWidth={1.5} />
             )}
           </TouchableOpacity>
         )}
@@ -75,38 +89,30 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   label: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
     marginBottom: 6,
-    letterSpacing: 0.3,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    borderRadius: 14,
+    borderRadius: 8,
+    borderWidth: 1,
     paddingHorizontal: 12,
-    height: 50,
-  },
-  inputFocused: {
-    borderColor: '#a855f7',
-    backgroundColor: 'rgba(24, 21, 52, 0.85)',
-  },
-  inputError: {
-    borderColor: '#ef4444',
+    height: 46,
   },
   leftIconContainer: {
     marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rightIconContainer: {
     padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
-    color: '#ffffff',
     fontSize: 14,
     height: '100%',
   },
@@ -114,6 +120,5 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 11,
     marginTop: 4,
-    marginLeft: 4,
   },
 });

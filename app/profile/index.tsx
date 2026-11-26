@@ -8,68 +8,88 @@ import {
   Modal,
   TextInput,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import {
   ArrowLeft,
-  ShieldCheck,
   Edit3,
   LogOut,
   Newspaper,
   ShoppingBag,
   AlertTriangle,
   X,
-  User,
-  Building,
   Phone,
-  Mail,
   CheckCircle2,
 } from 'lucide-react-native';
 import { GlassCard } from '@/components/GlassCard';
-import { IntroSplash } from '@/components/IntroSplash';
+import { SkeletonLoader } from '@/components/SkeletonLoader';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { island } from '@/context/IslandContext';
+import { useTheme } from '@/context/ThemeContext';
 import { foodService } from '@/services/food';
 import { complaintsService } from '@/services/complaints';
 import { postsService } from '@/services/posts';
+import { useMyPosts, useMyOrders, useMyTickets } from '@/hooks/queries/useProfileData';
 import { FoodOrder, Complaint, Post } from '@/types';
 import * as Haptics from 'expo-haptics';
+
+const WING_BUILDING_MAP: Record<string, string> = {
+  'Wing A': 'Chintamani',
+  'Wing B': 'Mayureshwar',
+  'Wing C': 'Chintamani',
+  'Wing D': 'Girijatmak',
+  'Wing E': 'Vighnahar',
+  'Wing F': 'Mahaganapati',
+  'Wing G': 'Varadavinayak',
+  'Wing H': 'Ballaleshwar',
+  'Wing I': 'Chintamani',
+  'Wing J': 'Mayureshwar',
+  'Wing K': 'Siddhivinayak',
+  'Wing L': 'Varadavinayak',
+};
+
+function getBuildingFlat(wing?: string, flatNumber?: string): string {
+  const building = (wing && WING_BUILDING_MAP[wing]) || wing || 'Chintamani';
+  const flat = flatNumber ? ` · ${flatNumber.trim()}` : '';
+  return `${building}${flat}`;
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, signOut, updateProfile } = useAuth();
   const { showToast } = useToast();
+  const { tokens, isDark } = useTheme();
 
   // Active sub-tab: 'posts' | 'orders' | 'tickets'
   const [activeSubTab, setActiveSubTab] = useState<'posts' | 'orders' | 'tickets'>('orders');
 
-  // User records
-  const [myOrders, setMyOrders] = useState<FoodOrder[]>([]);
-  const [myTickets, setMyTickets] = useState<Complaint[]>([]);
-  const [myPosts, setMyPosts] = useState<Post[]>([]);
+  // React Query cached user records
+  const { data: myPosts = [], isLoading: loadingPosts, refetch: refetchPosts } = useMyPosts();
+  const { data: myOrders = [], isLoading: loadingOrders, refetch: refetchOrders } = useMyOrders();
+  const { data: myTickets = [], isLoading: loadingTickets, refetch: refetchTickets } = useMyTickets();
+
+  const isLoading = loadingPosts || loadingOrders || loadingTickets;
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refetchPosts(), refetchOrders(), refetchTickets()]);
+    setRefreshing(false);
+  };
 
   // Edit Profile modal
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState(user?.full_name || '');
-  const [editBio, setEditBio] = useState(user?.bio || '');
   const [savingProfile, setSavingProfile] = useState(false);
-  const [showReplay, setShowReplay] = useState(false);
-
-  useEffect(() => {
-    foodService.getUserOrders().then(setMyOrders);
-    complaintsService.getUserTickets().then(setMyTickets);
-    postsService.getPosts('all').then((posts) => {
-      setMyPosts(posts.filter((p) => p.user_id === user?.id || p.user_id === 'usr-current-1'));
-    });
-  }, [user]);
 
   const handleSaveProfile = async () => {
     if (!editName.trim()) {
-      showToast('Validation Error', 'Name cannot be empty.', 'error');
+      island.error('Validation Error', 'Name cannot be empty.');
       return;
     }
 
@@ -77,46 +97,66 @@ export default function ProfileScreen() {
       setSavingProfile(true);
       await updateProfile({
         full_name: editName.trim(),
-        bio: editBio.trim(),
       });
       setShowEditModal(false);
+      island.success('Profile Saved', 'Your changes have been saved.');
     } catch {
-      // toast shown in context
+      island.error('Update Failed', 'Could not save profile.');
     } finally {
       setSavingProfile(false);
     }
   };
 
-  const handleSignOut = async () => {
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-    }
-    await signOut();
-    router.replace('/(auth)/login');
+  const handleSignOut = () => {
+    island.confirm({
+      title: 'Sign Out',
+      description: 'Are you sure you want to sign out of your resident account?',
+      confirmText: 'Sign Out',
+      cancelText: 'Cancel',
+      isDestructive: true,
+      onConfirm: async () => {
+        island.loading('Signing Out', 'Safely closing session...');
+        await signOut();
+        island.info('Signed Out', 'You have been safely signed out.');
+        router.replace('/(auth)/login');
+      },
+    });
   };
 
+  if (isLoading) {
+    return <SkeletonLoader variant="profile" />;
+  }
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Top Bar */}
-      <View style={styles.topBar}>
+    <View style={[styles.container, { backgroundColor: tokens.bgApp, paddingTop: insets.top }]}>
+      {/* Top Bar (Clean single-back navigation without duplicate sign-out icon) */}
+      <View style={[styles.topBar, { borderBottomColor: tokens.borderSubtle }]}>
         <TouchableOpacity
           style={styles.backBtn}
           onPress={() => router.back()}
           activeOpacity={0.7}
         >
-          <ArrowLeft size={20} color="#ffffff" />
+          <ArrowLeft size={20} color={tokens.textPrimary} strokeWidth={1.5} />
         </TouchableOpacity>
-        <Text style={styles.topTitle}>Resident Profile</Text>
-        <TouchableOpacity
-          style={styles.signOutHeaderBtn}
-          onPress={handleSignOut}
-          activeOpacity={0.7}
-        >
-          <LogOut size={18} color="#ef4444" />
-        </TouchableOpacity>
+        <Text style={[styles.topTitle, { color: tokens.textPrimary }]}>Resident Profile</Text>
+        <View style={styles.topRightSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(insets.bottom + 16, 24) },
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={tokens.textPrimary}
+            colors={[tokens.textPrimary]}
+          />
+        }
+      >
         {/* Resident Profile Card */}
         <GlassCard style={styles.profileCard}>
           <View style={styles.avatarRow}>
@@ -126,97 +166,155 @@ export default function ProfileScreen() {
                   user?.avatar_url ||
                   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
               }}
-              style={styles.avatar}
+              style={[styles.avatar, { borderColor: tokens.borderSubtle }]}
             />
 
             <View style={styles.profileMeta}>
-              <View style={styles.nameBadgeRow}>
-                <Text style={styles.fullName}>{user?.full_name || 'Resident'}</Text>
-                <View style={styles.verifiedBadge}>
-                  <ShieldCheck size={13} color="#10b981" />
-                  <Text style={styles.verifiedText}>Verified</Text>
-                </View>
-              </View>
-
-              <Text style={styles.flatText}>
-                {user?.wing || 'Wing B'} • Flat {user?.flat_number || '402'}
+              <Text style={[styles.fullName, { color: tokens.textPrimary }]}>
+                {user?.full_name || 'Resident'}
               </Text>
-              <Text style={styles.roleText}>
-                Role: {user?.role ? user.role.toUpperCase() : 'RESIDENT'}
+
+              <Text style={[styles.flatText, { color: tokens.textSecondary }]}>
+                {getBuildingFlat(user?.wing, user?.flat_number)}
+              </Text>
+              <Text style={[styles.roleText, { color: tokens.textMuted }]}>
+                {user?.role ? user.role.toUpperCase() : 'RESIDENT'}
               </Text>
             </View>
           </View>
 
-          {/* Bio */}
-          <Text style={styles.bioText}>
-            {user?.bio || 'Proud resident of Ashtavinayak Empire Co-op Housing Society.'}
-          </Text>
-
-          {/* Contact details */}
-          <View style={styles.contactDetails}>
+          {/* Contact Details (Phone only, email removed) */}
+          <View
+            style={[
+              styles.contactDetails,
+              {
+                backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                borderColor: tokens.borderSubtle,
+              },
+            ]}
+          >
             <View style={styles.contactRow}>
-              <Phone size={13} color="#94a3b8" />
-              <Text style={styles.contactText}>{user?.phone || '+91 98765 43210'}</Text>
-            </View>
-            <View style={styles.contactRow}>
-              <Mail size={13} color="#94a3b8" />
-              <Text style={styles.contactText}>{user?.email || 'resident@ashtavinayak.org'}</Text>
+              <Phone size={13} color={tokens.textMuted} strokeWidth={1.5} />
+              <Text style={[styles.contactText, { color: tokens.textSecondary }]}>
+                {user?.phone || '+91 98765 43210'}
+              </Text>
             </View>
           </View>
 
           {/* Inline Edit Profile Button */}
           <TouchableOpacity
-            style={styles.editProfileBtn}
+            style={[
+              styles.editProfileBtn,
+              {
+                backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                borderColor: tokens.borderSubtle,
+              },
+            ]}
             onPress={() => {
               setEditName(user?.full_name || '');
-              setEditBio(user?.bio || '');
               setShowEditModal(true);
             }}
             activeOpacity={0.8}
           >
-            <Edit3 size={15} color="#c084fc" />
-            <Text style={styles.editProfileText}>Edit Profile</Text>
+            <Edit3 size={14} color={tokens.textPrimary} strokeWidth={1.5} />
+            <Text style={[styles.editProfileText, { color: tokens.textPrimary }]}>Edit Profile</Text>
           </TouchableOpacity>
         </GlassCard>
 
         {/* Sub-Tabs: My Posts | My Orders | My Tickets */}
-        <View style={styles.subTabsContainer}>
+        <View
+          style={[
+            styles.subTabsContainer,
+            {
+              backgroundColor: isDark ? '#111113' : '#F4F4F5',
+              borderColor: tokens.borderSubtle,
+            },
+          ]}
+        >
           <TouchableOpacity
-            style={[styles.subTab, activeSubTab === 'posts' && styles.subTabActive]}
+            style={[
+              styles.subTab,
+              activeSubTab === 'posts' && [
+                styles.subTabActive,
+                {
+                  backgroundColor: isDark ? '#FFFFFF' : '#09090B',
+                  borderColor: isDark ? '#FFFFFF' : '#09090B',
+                },
+              ],
+            ]}
             onPress={() => setActiveSubTab('posts')}
           >
             <Newspaper
-              size={15}
-              color={activeSubTab === 'posts' ? '#ec4899' : '#94a3b8'}
+              size={14}
+              color={activeSubTab === 'posts' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted}
+              strokeWidth={1.5}
             />
-            <Text style={[styles.subTabText, activeSubTab === 'posts' && styles.subTabTextActive]}>
-              My Posts ({myPosts.length})
+            <Text
+              style={[
+                styles.subTabText,
+                { color: activeSubTab === 'posts' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted },
+                activeSubTab === 'posts' && styles.subTabTextActive,
+              ]}
+            >
+              Posts ({myPosts.length})
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.subTab, activeSubTab === 'orders' && styles.subTabActive]}
+            style={[
+              styles.subTab,
+              activeSubTab === 'orders' && [
+                styles.subTabActive,
+                {
+                  backgroundColor: isDark ? '#FFFFFF' : '#09090B',
+                  borderColor: isDark ? '#FFFFFF' : '#09090B',
+                },
+              ],
+            ]}
             onPress={() => setActiveSubTab('orders')}
           >
             <ShoppingBag
-              size={15}
-              color={activeSubTab === 'orders' ? '#f59e0b' : '#94a3b8'}
+              size={14}
+              color={activeSubTab === 'orders' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted}
+              strokeWidth={1.5}
             />
-            <Text style={[styles.subTabText, activeSubTab === 'orders' && styles.subTabTextActive]}>
-              My Orders ({myOrders.length})
+            <Text
+              style={[
+                styles.subTabText,
+                { color: activeSubTab === 'orders' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted },
+                activeSubTab === 'orders' && styles.subTabTextActive,
+              ]}
+            >
+              Orders ({myOrders.length})
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.subTab, activeSubTab === 'tickets' && styles.subTabActive]}
+            style={[
+              styles.subTab,
+              activeSubTab === 'tickets' && [
+                styles.subTabActive,
+                {
+                  backgroundColor: isDark ? '#FFFFFF' : '#09090B',
+                  borderColor: isDark ? '#FFFFFF' : '#09090B',
+                },
+              ],
+            ]}
             onPress={() => setActiveSubTab('tickets')}
           >
             <AlertTriangle
-              size={15}
-              color={activeSubTab === 'tickets' ? '#38bdf8' : '#94a3b8'}
+              size={14}
+              color={activeSubTab === 'tickets' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted}
+              strokeWidth={1.5}
             />
-            <Text style={[styles.subTabText, activeSubTab === 'tickets' && styles.subTabTextActive]}>
-              My Tickets ({myTickets.length})
+            <Text
+              style={[
+                styles.subTabText,
+                { color: activeSubTab === 'tickets' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textMuted },
+                activeSubTab === 'tickets' && styles.subTabTextActive,
+              ]}
+            >
+              Tickets ({myTickets.length})
             </Text>
           </TouchableOpacity>
         </View>
@@ -225,20 +323,34 @@ export default function ProfileScreen() {
         {activeSubTab === 'orders' && (
           <View style={styles.recordsList}>
             {myOrders.length === 0 ? (
-              <Text style={styles.emptyText}>You haven't ordered any meals yet.</Text>
+              <Text style={[styles.emptyText, { color: tokens.textMuted }]}>
+                No meal orders placed yet.
+              </Text>
             ) : (
               myOrders.map((order) => (
                 <GlassCard key={order.id} style={styles.recordCard}>
                   <View style={styles.recordHeader}>
-                    <Text style={styles.recordTitle}>{order.dish?.dish_name || 'Home-Cooked Meal'}</Text>
-                    <View style={styles.statusPill}>
-                      <Text style={styles.statusPillText}>{order.order_status}</Text>
+                    <Text style={[styles.recordTitle, { color: tokens.textPrimary }]}>
+                      {order.dish?.dish_name || 'Home-Cooked Meal'}
+                    </Text>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        {
+                          backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                          borderColor: tokens.borderSubtle,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.statusPillText, { color: tokens.textSecondary }]}>
+                        {order.order_status}
+                      </Text>
                     </View>
                   </View>
-                  <Text style={styles.recordMeta}>
-                    Quantity: {order.quantity} • Total: ₹{order.total_amount}
+                  <Text style={[styles.recordMeta, { color: tokens.textMuted }]}>
+                    Quantity: {order.quantity} · Total: ₹{order.total_amount}
                   </Text>
-                  <Text style={styles.recordDelivery}>
+                  <Text style={[styles.recordDelivery, { color: tokens.textSecondary }]}>
                     Deliver to: {order.delivery_flat} ({order.payment_method})
                   </Text>
                 </GlassCard>
@@ -250,21 +362,35 @@ export default function ProfileScreen() {
         {activeSubTab === 'tickets' && (
           <View style={styles.recordsList}>
             {myTickets.length === 0 ? (
-              <Text style={styles.emptyText}>You have no filed complaints.</Text>
+              <Text style={[styles.emptyText, { color: tokens.textMuted }]}>
+                No complaints filed.
+              </Text>
             ) : (
               myTickets.map((ticket) => (
                 <GlassCard key={ticket.id} style={styles.recordCard}>
                   <View style={styles.recordHeader}>
-                    <Text style={styles.recordTitle}>{ticket.title}</Text>
-                    <View style={styles.statusPill}>
-                      <Text style={styles.statusPillText}>{ticket.status}</Text>
+                    <Text style={[styles.recordTitle, { color: tokens.textPrimary }]}>
+                      {ticket.title}
+                    </Text>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        {
+                          backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                          borderColor: tokens.borderSubtle,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.statusPillText, { color: tokens.textSecondary }]}>
+                        {ticket.status}
+                      </Text>
                     </View>
                   </View>
-                  <Text style={styles.recordMeta}>
-                    {ticket.category} • Urgency: {ticket.urgency}
+                  <Text style={[styles.recordMeta, { color: tokens.textMuted }]}>
+                    {ticket.category} · Urgency: {ticket.urgency}
                   </Text>
                   {ticket.admin_note ? (
-                    <Text style={styles.recordAdminNote}>
+                    <Text style={[styles.recordAdminNote, { color: tokens.textSecondary }]}>
                       Note: {ticket.admin_note}
                     </Text>
                   ) : null}
@@ -277,102 +403,116 @@ export default function ProfileScreen() {
         {activeSubTab === 'posts' && (
           <View style={styles.recordsList}>
             {myPosts.length === 0 ? (
-              <Text style={styles.emptyText}>You haven't published any posts yet.</Text>
+              <Text style={[styles.emptyText, { color: tokens.textMuted }]}>
+                No published posts yet.
+              </Text>
             ) : (
               myPosts.map((post) => (
                 <GlassCard key={post.id} style={styles.recordCard}>
                   <View style={styles.recordHeader}>
-                    <Text style={styles.recordTag}>{post.tag}</Text>
-                    <Text style={styles.recordLikes}>{post.likes_count} Likes</Text>
+                    <Text style={[styles.recordTag, { color: tokens.textSecondary }]}>
+                      {post.tag}
+                    </Text>
+                    <Text style={[styles.recordLikes, { color: tokens.textMuted }]}>
+                      {post.likes_count} Likes
+                    </Text>
                   </View>
-                  <Text style={styles.recordBody}>{post.content}</Text>
+                  <Text style={[styles.recordBody, { color: tokens.textSecondary }]}>
+                    {post.content}
+                  </Text>
                 </GlassCard>
               ))
             )}
           </View>
         )}
 
-        {/* Replay Startup Intro Animation */}
-        <TouchableOpacity
-          style={styles.replayBtn}
-          onPress={() => setShowReplay(true)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.replayBtnText}>✨ Replay Startup Intro Animation</Text>
-        </TouchableOpacity>
+        {/* Flexible bottom spacer pushing Sign Out cleanly to the bottom */}
+        <View style={styles.bottomSpacer} />
 
-        {/* Sign Out CTA button */}
+        {/* Anchored Sign Out CTA button */}
         <TouchableOpacity
-          style={styles.signOutBtn}
+          style={[
+            styles.signOutBtn,
+            {
+              backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEE2E2',
+              borderColor: isDark ? 'rgba(239, 68, 68, 0.25)' : '#FECACA',
+            },
+          ]}
           onPress={handleSignOut}
           activeOpacity={0.8}
         >
-          <LogOut size={16} color="#ef4444" />
-          <Text style={styles.signOutBtnText}>Sign Out of Ashtavinayak Empire</Text>
+          <LogOut size={16} color="#ef4444" strokeWidth={1.5} />
+          <Text style={styles.signOutBtnText}>Sign Out</Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Replay Intro Splash when requested */}
-      {showReplay && (
-        <IntroSplash
-          forcePlay
-          onFinish={() => setShowReplay(false)}
-        />
-      )}
-
-      {/* Edit Profile Modal */}
-      <Modal visible={showEditModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Resident Profile</Text>
-              <TouchableOpacity onPress={() => setShowEditModal(false)}>
-                <X size={20} color="#94a3b8" />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.inputLabel}>Full Name</Text>
-            <TextInput
-              style={styles.input}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Your name"
-              placeholderTextColor="#64748b"
-            />
-
-            <Text style={styles.inputLabel}>Resident Bio</Text>
-            <TextInput
-              style={[styles.input, { height: 90 }]}
-              value={editBio}
-              onChangeText={setEditBio}
-              placeholder="Tell your neighbors about your hobbies, work, etc."
-              placeholderTextColor="#64748b"
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-
-            <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={handleSaveProfile}
-              disabled={savingProfile}
-              activeOpacity={0.85}
+      {/* Edit Profile Modal (Name edit only, bio removed) */}
+      {showEditModal && (
+        <Modal
+          visible={true}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setShowEditModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: isDark ? '#121214' : '#FFFFFF',
+                  borderColor: tokens.borderSubtle,
+                },
+              ]}
             >
-              <LinearGradient
-                colors={['#7c3aed', '#ec4899']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.saveGradient}
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: tokens.textPrimary }]}>
+                  Edit Resident Profile
+                </Text>
+                <TouchableOpacity onPress={() => setShowEditModal(false)}>
+                  <X size={18} color={tokens.textMuted} strokeWidth={1.5} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.inputLabel, { color: tokens.textSecondary }]}>Full Name</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                    borderColor: tokens.borderSubtle,
+                    color: tokens.textPrimary,
+                  },
+                ]}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Your name"
+                placeholderTextColor={tokens.textMuted}
+                autoFocus
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.saveBtn,
+                  { backgroundColor: isDark ? '#FFFFFF' : '#09090B' },
+                ]}
+                onPress={handleSaveProfile}
+                disabled={savingProfile}
+                activeOpacity={0.85}
               >
-                <CheckCircle2 size={16} color="#ffffff" />
-                <Text style={styles.saveText}>
+                <CheckCircle2 size={16} color={isDark ? '#000000' : '#FFFFFF'} strokeWidth={1.5} />
+                <Text
+                  style={[
+                    styles.saveText,
+                    { color: isDark ? '#000000' : '#FFFFFF' },
+                  ]}
+                >
                   {savingProfile ? 'Saving...' : 'Save Profile Changes'}
                 </Text>
-              </LinearGradient>
-            </TouchableOpacity>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -380,7 +520,6 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
   },
   topBar: {
     flexDirection: 'row',
@@ -389,99 +528,65 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
   backBtn: {
     padding: 6,
   },
   topTitle: {
-    color: '#ffffff',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
   },
-  signOutHeaderBtn: {
-    padding: 6,
+  topRightSpacer: {
+    width: 32,
   },
   scrollContent: {
+    flexGrow: 1,
     padding: 16,
-    paddingBottom: 40,
   },
   profileCard: {
-    padding: 20,
-    marginBottom: 20,
+    padding: 16,
+    marginBottom: 16,
   },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 2,
-    borderColor: '#c084fc',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 1,
     marginRight: 14,
   },
   profileMeta: {
     flex: 1,
   },
-  nameBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
   fullName: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '800',
-    marginRight: 8,
-  },
-  verifiedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  verifiedText: {
-    color: '#34d399',
-    fontSize: 10,
-    fontWeight: '700',
-    marginLeft: 3,
+    fontSize: 17,
+    fontWeight: '600',
   },
   flatText: {
-    color: '#c084fc',
     fontSize: 13,
-    fontWeight: '700',
-    marginTop: 3,
+    fontWeight: '500',
+    marginTop: 4,
   },
   roleText: {
-    color: '#94a3b8',
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '400',
     marginTop: 2,
   },
-  bioText: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    lineHeight: 18,
+  contactDetails: {
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
     marginTop: 14,
     marginBottom: 12,
-  },
-  contactDetails: {
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 14,
-    gap: 6,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   contactText: {
-    color: '#cbd5e1',
     fontSize: 12,
     marginLeft: 8,
   },
@@ -489,53 +594,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    borderRadius: 10,
-    paddingVertical: 9,
+    borderRadius: 8,
+    paddingVertical: 10,
   },
   editProfileText: {
-    color: '#c084fc',
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '500',
     marginLeft: 6,
   },
   subTabsContainer: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    borderRadius: 14,
+    borderRadius: 10,
     padding: 4,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   subTab: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 9,
-    borderRadius: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   subTabActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
   },
   subTabText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '600',
-    marginLeft: 5,
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 6,
   },
   subTabTextActive: {
-    color: '#ffffff',
-    fontWeight: '700',
+    fontWeight: '600',
   },
   recordsList: {
     gap: 12,
   },
   recordCard: {
-    padding: 14,
+    padding: 16,
   },
   recordHeader: {
     flexDirection: 'row',
@@ -544,92 +642,70 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   recordTitle: {
-    color: '#ffffff',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     flex: 1,
   },
   statusPill: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
+    borderWidth: 1,
   },
   statusPillText: {
-    color: '#34d399',
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '500',
   },
   recordMeta: {
-    color: '#94a3b8',
     fontSize: 12,
   },
   recordDelivery: {
-    color: '#c084fc',
-    fontSize: 11,
+    fontSize: 12,
     marginTop: 4,
   },
   recordAdminNote: {
-    color: '#fbbf24',
     fontSize: 11,
     marginTop: 4,
   },
   recordTag: {
-    color: '#c084fc',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '500',
   },
   recordLikes: {
-    color: '#ec4899',
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: 12,
   },
   recordBody: {
-    color: '#cbd5e1',
     fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   emptyText: {
-    color: '#64748b',
     fontSize: 13,
     textAlign: 'center',
     paddingVertical: 24,
   },
-  replayBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 20,
-  },
-  replayBtnText: {
-    color: '#fbbf24',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+  bottomSpacer: {
+    flex: 1,
+    minHeight: 28,
   },
   signOutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginTop: 24,
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 8,
   },
   signOutBtnText: {
     color: '#ef4444',
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
     marginLeft: 8,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -637,10 +713,8 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '100%',
     maxWidth: 380,
-    backgroundColor: '#181534',
-    borderRadius: 20,
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
     padding: 20,
   },
   modalHeader: {
@@ -650,42 +724,33 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '600',
   },
   inputLabel: {
-    color: '#cbd5e1',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '500',
     marginBottom: 6,
     marginTop: 10,
   },
   input: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderRadius: 12,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    color: '#ffffff',
     fontSize: 14,
   },
   saveBtn: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 20,
-  },
-  saveGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 48,
+    borderRadius: 8,
+    height: 44,
+    marginTop: 20,
+    gap: 8,
   },
   saveText: {
-    color: '#ffffff',
     fontSize: 14,
-    fontWeight: '800',
-    marginLeft: 6,
+    fontWeight: '600',
   },
 });

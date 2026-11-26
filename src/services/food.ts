@@ -1,6 +1,8 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { FoodListing, FoodOrder, DietType } from '@/types';
 import { INITIAL_FOOD_LISTINGS, CURRENT_USER } from './mockData';
+import { uploadMediaToR2 } from './storage';
+import { getAuthenticatedUserId } from './auth';
 
 let localFoodListings: FoodListing[] = [...INITIAL_FOOD_LISTINGS];
 let localOrders: FoodOrder[] = [
@@ -45,16 +47,43 @@ export const foodService = {
     portionsAvailable: number;
     imageUrl?: string;
   }): Promise<FoodListing> {
+    const userId = await getAuthenticatedUserId();
+
+    let finalImageUrl = params.imageUrl;
+    if (params.imageUrl && !params.imageUrl.startsWith('http')) {
+      finalImageUrl = await uploadMediaToR2(params.imageUrl, 'food', 'image/jpeg');
+    }
+
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('food_listings')
+        .insert({
+          chef_id: userId,
+          dish_name: params.dishName,
+          price: params.price,
+          diet_type: params.dietType,
+          timing: params.timing,
+          portions_left: params.portionsAvailable,
+          image_url: finalImageUrl || null,
+          is_active: true,
+        })
+        .select('*, chef:profiles(*)')
+        .single();
+
+      if (error) throw new Error(`Failed to publish dish: ${error.message}`);
+      if (data) return data;
+    }
+
     const newDish: FoodListing = {
       id: `food-${Date.now()}`,
-      chef_id: CURRENT_USER.id,
+      chef_id: userId || CURRENT_USER.id,
       dish_name: params.dishName,
       price: params.price,
       diet_type: params.dietType,
       timing: params.timing,
       portions_left: params.portionsAvailable,
       image_url:
-        params.imageUrl ||
+        finalImageUrl ||
         (params.dietType === 'Pure Veg'
           ? 'https://images.unsplash.com/photo-1546833999-b9f581a1996d?w=600&auto=format&fit=crop&q=80'
           : 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=600&auto=format&fit=crop&q=80'),
@@ -63,15 +92,6 @@ export const foodService = {
       created_at: new Date().toISOString(),
       chef: CURRENT_USER,
     };
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase.from('food_listings').insert(newDish).select().single();
-        if (!error && data) return { ...data, chef: CURRENT_USER };
-      } catch {
-        // fallback
-      }
-    }
 
     localFoodListings = [newDish, ...localFoodListings];
     return newDish;
@@ -83,6 +103,53 @@ export const foodService = {
     deliveryFlat: string;
     deliveryNote?: string;
   }): Promise<FoodOrder> {
+    const userId = await getAuthenticatedUserId();
+
+    if (isSupabaseConfigured) {
+      const { data: dishData, error: dishError } = await supabase
+        .from('food_listings')
+        .select('*, chef:profiles(*)')
+        .eq('id', params.listingId)
+        .single();
+
+      if (dishError || !dishData) {
+        throw new Error('Dish is no longer available');
+      }
+
+      if (dishData.portions_left < params.quantity) {
+        throw new Error(`Only ${dishData.portions_left} portion(s) left!`);
+      }
+
+      const totalAmount = Number(dishData.price) * params.quantity;
+
+      const { data: orderId, error: rpcError } = await supabase.rpc('place_food_order', {
+        p_listing_id: params.listingId,
+        p_resident_id: userId,
+        p_quantity: params.quantity,
+        p_total_amount: totalAmount,
+        p_delivery_flat: params.deliveryFlat,
+        p_delivery_note: params.deliveryNote || '',
+      });
+
+      if (rpcError) {
+        throw new Error(`Order failed: ${rpcError.message}`);
+      }
+
+      return {
+        id: (orderId as string) || `ord-${Date.now()}`,
+        listing_id: params.listingId,
+        resident_id: userId,
+        quantity: params.quantity,
+        total_amount: totalAmount,
+        delivery_flat: params.deliveryFlat,
+        delivery_note: params.deliveryNote,
+        payment_method: 'Pay on Delivery',
+        order_status: 'Confirmed',
+        created_at: new Date().toISOString(),
+        dish: dishData,
+      };
+    }
+
     const listingIndex = localFoodListings.findIndex((d) => d.id === params.listingId);
     if (listingIndex === -1) throw new Error('Dish is no longer available');
 
@@ -115,22 +182,6 @@ export const foodService = {
     };
 
     localOrders = [newOrder, ...localOrders];
-
-    if (isSupabaseConfigured) {
-      try {
-        await supabase.rpc('place_food_order', {
-          p_listing_id: params.listingId,
-          p_resident_id: CURRENT_USER.id,
-          p_quantity: params.quantity,
-          p_total_amount: totalAmount,
-          p_delivery_flat: params.deliveryFlat,
-          p_delivery_note: params.deliveryNote || '',
-        });
-      } catch {
-        // fallback
-      }
-    }
-
     return newOrder;
   },
 

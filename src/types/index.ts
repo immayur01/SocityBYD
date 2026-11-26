@@ -24,6 +24,7 @@ export interface UserProfile {
   role: UserRole;
   bio?: string;
   avatar_url?: string;
+  expo_push_token?: string;
   created_at: string;
 }
 
@@ -34,8 +35,14 @@ export interface Post {
   user_id: string;
   tag: PostTag;
   content: string;
+  title?: string;
+  event_date?: string;
+  event_location?: string;
+  announcement_priority?: 'normal' | 'urgent';
   media_url?: string;
-  media_type?: 'image' | 'video';
+  media_type?: 'image' | 'video' | 'file';
+  file_name?: string;
+  file_size?: number;
   poster_url?: string;
   likes_count: number;
   created_at: string;
@@ -45,6 +52,17 @@ export interface Post {
   comments_count?: number;
 }
 
+export interface CommentReply {
+  id: string;
+  comment_id: string;
+  user_id: string;
+  reply: string;
+  created_at: string;
+  user?: UserProfile;
+  likes_count?: number;
+  is_liked?: boolean;
+}
+
 export interface PostComment {
   id: string;
   post_id: string;
@@ -52,6 +70,10 @@ export interface PostComment {
   comment: string;
   created_at: string;
   user?: UserProfile;
+  likes_count?: number;
+  is_liked?: boolean;
+  is_edited?: boolean;
+  replies?: CommentReply[];
 }
 
 export type DietType = 'Pure Veg' | 'Non-Veg';

@@ -9,6 +9,8 @@
     "scheme": "ashtavinayak",
     "userInterfaceStyle": "dark",
     "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
       "backgroundColor": "#080813"
     },
     "ios": {
@@ -42,7 +44,8 @@
             "node_modules/@expo-google-fonts/plus-jakarta-sans/PlusJakartaSans_700Bold.ttf"
           ]
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
