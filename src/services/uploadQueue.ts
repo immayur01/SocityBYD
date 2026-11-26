@@ -44,6 +44,7 @@ export interface UploadTaskPayload {
   noticePriority?: 'normal' | 'urgent';
   noticeMessage?: string;
   pinDuration?: 'Off' | '24 Hours' | '7 Days';
+  durationHours?: 24 | 48;
 }
 
 type UploadSuccessListener = (post: Post) => void;
@@ -215,6 +216,7 @@ class UploadQueue {
         eventDate: payload.mode === 'EVENT' && combinedEventDateTime ? combinedEventDateTime : undefined,
         eventLocation: payload.mode === 'EVENT' ? payload.eventVenue?.trim() : undefined,
         announcementPriority: payload.mode === 'NOTICE' ? payload.noticePriority : undefined,
+        durationHours: payload.durationHours || 48,
       });
 
       // 5. Success Transition: 100% -> Checkmark

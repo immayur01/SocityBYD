@@ -39,11 +39,15 @@ import {
   FileText,
   Calendar,
   MapPin,
+  ArrowBigUp,
+  Clock,
 } from 'lucide-react-native';
 import { Post, PostComment, CommentReply, UserProfile } from '@/types';
 import { postsService } from '@/services/posts';
 import { CURRENT_USER } from '@/services/mockData';
 import { CommentsSkeletonList } from '@/components/FeedPostSkeleton';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
+import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import * as Haptics from 'expo-haptics';
 
@@ -54,34 +58,14 @@ interface PostCardProps {
   darkMode?: boolean;
 }
 
-const WING_BUILDING_MAP: Record<string, string> = {
-  'Wing A': 'Chintamani',
-  'Wing B': 'Mayureshwar',
-  'Wing C': 'Chintamani',
-  'Wing D': 'Girijatmak',
-  'Wing E': 'Vighnahar',
-  'Wing F': 'Mahaganapati',
-  'Wing G': 'Varadavinayak',
-  'Wing H': 'Ballaleshwar',
-  'Wing I': 'Chintamani',
-  'Wing J': 'Mayureshwar',
-  'Wing K': 'Siddhivinayak',
-  'Wing L': 'Varadavinayak',
-};
-
 function getBuildingFlat(author?: UserProfile): string {
-  if (!author) return 'Chintamani · 303';
-  const anyAuthor = author as any;
-  const rawBuilding = (anyAuthor.building || WING_BUILDING_MAP[author.wing] || 'Chintamani').trim();
+  if (!author) return 'Wing B · 303';
+  const wing = (author.wing || 'Wing B').trim();
   const rawFlat = (author.flat_number || '').trim();
   if (rawFlat) {
-    if (rawBuilding.endsWith(rawFlat)) {
-      const b = rawBuilding.slice(0, -rawFlat.length).trim();
-      return `${b} · ${rawFlat}`;
-    }
-    return `${rawBuilding} · ${rawFlat}`;
+    return `${wing} · ${rawFlat}`;
   }
-  return rawBuilding;
+  return wing;
 }
 
 function getRelativeTime(dateStr: string): string {
@@ -93,11 +77,25 @@ function getRelativeTime(dateStr: string): string {
   const diffDays = Math.floor(diffHours / 24);
 
   if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins} mins`;
-  if (diffHours === 1) return '1 hour';
-  if (diffHours < 24) return `${diffHours} hours`;
-  if (diffDays === 1) return '1 day';
-  return `${diffDays} days`;
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours === 1) return '1h ago';
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return '1d ago';
+  return `${diffDays}d ago`;
+}
+
+function getCountdownBadge(expiresAt?: string): string | null {
+  if (!expiresAt) return null;
+  const now = Date.now();
+  const expiry = new Date(expiresAt).getTime();
+  const remainingMs = expiry - now;
+  if (remainingMs <= 0) return 'Expired';
+  const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
+  const remainingMins = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+  if (remainingHours > 0) {
+    return `${remainingHours}h ${remainingMins}m left`;
+  }
+  return `${remainingMins}m left`;
 }
 
 function getCommentRelativeTime(dateStr?: string): string {
@@ -142,6 +140,7 @@ export const PostCard: React.FC<PostCardProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const { tokens, isDark } = useTheme();
+  const { user } = useAuth();
 
   const [isLiked, setIsLiked] = useState(post.is_liked ?? false);
   const [likesCount, setLikesCount] = useState(post.likes_count);
@@ -604,19 +603,13 @@ export const PostCard: React.FC<PostCardProps> = ({
           style={styles.commentMainRow}
         >
           {/* Avatar */}
-          {item.user?.avatar_url ? (
-            <Image
-              source={{ uri: item.user.avatar_url }}
-              style={styles.commentAvatar}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={[styles.commentAvatarFallback, { backgroundColor: isDark ? '#18181B' : '#E4E4E7' }]}>
-              <Text style={[styles.commentAvatarInitials, { color: tokens.textPrimary }]}>
-                {getAuthorInitials(item.user?.full_name)}
-              </Text>
-            </View>
-          )}
+          <ResidentAvatar
+            name={item.user?.full_name}
+            avatarUrl={item.user?.avatar_url}
+            size={36}
+            borderRadius={18}
+            style={{ marginRight: 10, marginTop: 2 }}
+          />
 
           {/* Details */}
           <View style={styles.commentContentCol}>
@@ -716,24 +709,13 @@ export const PostCard: React.FC<PostCardProps> = ({
 
               return (
                 <View key={reply.id} style={styles.replyRow}>
-                  {reply.user?.avatar_url ? (
-                    <Image
-                      source={{ uri: reply.user.avatar_url }}
-                      style={styles.replyAvatar}
-                      contentFit="cover"
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.replyAvatarFallback,
-                        { backgroundColor: isDark ? '#18181B' : '#E4E4E7' },
-                      ]}
-                    >
-                      <Text style={[styles.replyAvatarInitials, { color: tokens.textPrimary }]}>
-                        {getAuthorInitials(reply.user?.full_name)}
-                      </Text>
-                    </View>
-                  )}
+                  <ResidentAvatar
+                    name={reply.user?.full_name}
+                    avatarUrl={reply.user?.avatar_url}
+                    size={28}
+                    borderRadius={14}
+                    style={{ marginRight: 8, marginTop: 2 }}
+                  />
 
                   <View style={styles.replyContentCol}>
                     <View style={styles.replyAuthorLine}>
@@ -820,19 +802,13 @@ export const PostCard: React.FC<PostCardProps> = ({
       ============================================================ */}
       <View style={styles.cardHeader}>
         <View style={styles.authorRow}>
-          {post.author?.avatar_url ? (
-            <Image
-              source={{ uri: post.author.avatar_url }}
-              style={[styles.avatarSquircle, { borderColor: tokens.borderSubtle }]}
-              contentFit="cover"
-            />
-          ) : (
-            <View style={[styles.avatarSquircle, { backgroundColor: isDark ? '#18181B' : '#E4E4E7', borderColor: tokens.borderSubtle }]}>
-              <Text style={[styles.avatarInitials, { color: tokens.textPrimary }]}>
-                {getAuthorInitials(post.author?.full_name)}
-              </Text>
-            </View>
-          )}
+          <ResidentAvatar
+            name={post.author?.full_name}
+            avatarUrl={post.author?.avatar_url}
+            size={36}
+            borderRadius={10}
+            style={{ marginRight: 10 }}
+          />
 
           <Text
             style={[styles.authorName, { color: tokens.textPrimary }]}
@@ -844,6 +820,14 @@ export const PostCard: React.FC<PostCardProps> = ({
 
         {/* Building + Flat Provenance on far right */}
         <View style={styles.provenanceWrap}>
+          {post.expires_at && getCountdownBadge(post.expires_at) ? (
+            <View style={[styles.countdownPill, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)', borderColor: tokens.borderSubtle }]}>
+              <Clock size={11} color={tokens.textMuted} strokeWidth={1.5} />
+              <Text style={[styles.countdownText, { color: tokens.textMuted }]}>
+                {getCountdownBadge(post.expires_at)}
+              </Text>
+            </View>
+          ) : null}
           <Text style={[styles.provenanceText, { color: tokens.textMuted }]}>
             {buildingFlatText}
           </Text>
@@ -1002,7 +986,7 @@ export const PostCard: React.FC<PostCardProps> = ({
               </View>
             )}
 
-            {/* Double Tap Heart Burst Animated Overlay */}
+            {/* Double Tap Upvote Burst Animated Overlay */}
             <Animated.View
               pointerEvents="none"
               style={[
@@ -1013,7 +997,7 @@ export const PostCard: React.FC<PostCardProps> = ({
                 },
               ]}
             >
-              <Heart size={64} color="#FFFFFF" fill="#EF4444" strokeWidth={1.5} />
+              <ArrowBigUp size={64} color="#FFFFFF" fill="#10B981" strokeWidth={1.5} />
             </Animated.View>
           </Pressable>
         </View>
@@ -1024,24 +1008,24 @@ export const PostCard: React.FC<PostCardProps> = ({
           3. STREAMLINED ACTION ROW & RELATIVE TIMESTAMP
       ============================================================ */}
       <View style={styles.actionBar}>
-        {/* Left Actions: Like, Comment, Paper-Plane Share */}
+        {/* Left Actions: Upvote, Comment, Paper-Plane Share */}
         <View style={styles.leftActions}>
-          {/* Like Button */}
+          {/* Upvote Button */}
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={handleLike}
             activeOpacity={0.7}
           >
-            <Heart
-              size={20}
-              color={isLiked ? '#EF4444' : tokens.textPrimary}
-              fill={isLiked ? '#EF4444' : 'transparent'}
+            <ArrowBigUp
+              size={22}
+              color={isLiked ? '#10B981' : tokens.textPrimary}
+              fill={isLiked ? '#10B981' : 'transparent'}
               strokeWidth={1.5}
             />
             <Text
               style={[
                 styles.actionCount,
-                { color: isLiked ? '#EF4444' : tokens.textSecondary },
+                { color: isLiked ? '#10B981' : tokens.textSecondary, fontWeight: isLiked ? '700' : '500' },
               ]}
             >
               {likesCount}
@@ -1478,10 +1462,12 @@ export const PostCard: React.FC<PostCardProps> = ({
                   },
                 ]}
               >
-                <Image
-                  source={{ uri: CURRENT_USER.avatar_url }}
-                  style={styles.composerAvatar}
-                  contentFit="cover"
+                <ResidentAvatar
+                  name={user?.full_name || CURRENT_USER.full_name}
+                  avatarUrl={user?.avatar_url || CURRENT_USER.avatar_url}
+                  size={32}
+                  borderRadius={16}
+                  style={{ marginRight: 10 }}
                 />
 
                 <TextInput
@@ -1729,6 +1715,20 @@ const styles = StyleSheet.create({
   provenanceWrap: {
     alignItems: 'flex-end',
     justifyContent: 'center',
+    gap: 4,
+  },
+  countdownPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  countdownText: {
+    fontSize: 10.5,
+    fontWeight: '500',
   },
   provenanceText: {
     fontSize: 12,

@@ -13,6 +13,7 @@ import { FlashList } from '@shopify/flash-list';
 import { KeyboardStickyView, KeyboardAvoidingView } from '@/shims/keyboard-controller';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
 import {
   ArrowLeft,
   X,
@@ -369,13 +370,10 @@ export default function ChatScreen() {
                 activeOpacity={0.75}
               >
                 <View style={styles.dmAvatarWrapper}>
-                  <Image
-                    source={{
-                      uri:
-                        item.recipient.avatar_url ||
-                        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-                    }}
-                    style={styles.dmAvatar}
+                  <ResidentAvatar
+                    name={item.recipient.full_name}
+                    avatarUrl={item.recipient.avatar_url}
+                    size={48}
                   />
                   {item.isOnline && <View style={styles.onlineIndicator} />}
                 </View>

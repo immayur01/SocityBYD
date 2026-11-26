@@ -136,8 +136,9 @@ export const postsService = {
           const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
           return { posts: data, nextCursor };
         }
+        return { posts: [], nextCursor: null };
       } catch {
-        // fallback to local mock
+        return { posts: [], nextCursor: null };
       }
     }
 
@@ -178,8 +179,11 @@ export const postsService = {
     eventDate?: string;
     eventLocation?: string;
     announcementPriority?: 'normal' | 'urgent';
+    durationHours?: 24 | 48;
   }): Promise<Post> {
     const userId = await getAuthenticatedUserId();
+    const durationHours = params.durationHours || 48;
+    const expiresAt = new Date(Date.now() + durationHours * 3600 * 1000).toISOString();
 
     if (isSupabaseConfigured) {
       const cleanMediaType = params.mediaType === 'file' ? null : (params.mediaType || null);
@@ -191,6 +195,7 @@ export const postsService = {
           content: params.content,
           media_url: params.mediaUrl || null,
           media_type: cleanMediaType,
+          expires_at: expiresAt,
         })
         .select('*, author:profiles(*)')
         .single();
@@ -208,9 +213,6 @@ export const postsService = {
       }
     }
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 48 * 60 * 60 * 1000); // 48-hour expiration
-
     const newPost: Post = {
       id: `post-${Date.now()}`,
       user_id: userId || CURRENT_USER.id,
@@ -224,11 +226,11 @@ export const postsService = {
       event_date: params.eventDate,
       event_location: params.eventLocation,
       announcement_priority: params.announcementPriority,
+      expires_at: expiresAt,
       likes_count: 0,
       is_liked: false,
       comments_count: 0,
-      created_at: now.toISOString(),
-      expires_at: expiresAt.toISOString(),
+      created_at: new Date().toISOString(),
       author: CURRENT_USER,
     };
 

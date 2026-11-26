@@ -41,7 +41,8 @@ export const complaintsService = {
           .limit(limit);
 
         if (visibility === 'admin') {
-          query = query.eq('user_id', CURRENT_USER.id);
+          const uid = await getAuthenticatedUserId();
+          query = query.eq('user_id', uid);
         }
 
         if (before) {
@@ -53,8 +54,9 @@ export const complaintsService = {
           const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
           return { complaints: data, nextCursor };
         }
+        return { complaints: [], nextCursor: null };
       } catch {
-        // fallback
+        return { complaints: [], nextCursor: null };
       }
     }
 
@@ -175,7 +177,22 @@ export const complaintsService = {
     return { isUpvoted: newIsUpvoted, count: newCount };
   },
 
-  async getUserTickets(): Promise<Complaint[]> {
+  async getUserTickets(userId?: string): Promise<Complaint[]> {
+    if (isSupabaseConfigured) {
+      try {
+        const uid = userId || (await getAuthenticatedUserId());
+        if (!uid) return [];
+        const { data, error } = await supabase
+          .from('complaints')
+          .select('*')
+          .eq('user_id', uid)
+          .order('created_at', { ascending: false });
+        if (!error && data) return data;
+        return [];
+      } catch {
+        return [];
+      }
+    }
     return localComplaints.filter((c) => c.user_id === CURRENT_USER.id);
   },
 };

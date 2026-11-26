@@ -13,8 +13,8 @@ import * as Haptics from 'expo-haptics';
 
 export default function OtpVerificationScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ signUpData?: string; targetPhone?: string }>();
-  const { verifyPhoneOtp, requestPhoneOtp, requestRegistrationOtp } = useAuth();
+  const params = useLocalSearchParams<{ signUpData?: string; targetEmail?: string; targetPhone?: string }>();
+  const { verifyEmailOtp, resendSignUpOtp, verifyPhoneOtp, requestPhoneOtp } = useAuth();
   const { tokens, isDark } = useTheme();
 
   const [otp, setOtp] = useState('');
@@ -25,9 +25,8 @@ export default function OtpVerificationScreen() {
     ? JSON.parse(params.signUpData)
     : null;
 
-  const displayPhone = params.targetPhone
-    ? `+91 ${params.targetPhone}`
-    : signUpData?.phone || '+91 98765 43210';
+  const targetEmail = params.targetEmail || signUpData?.email || '';
+  const displayTarget = targetEmail || (params.targetPhone ? `+91 ${params.targetPhone}` : 'your email');
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -47,9 +46,19 @@ export default function OtpVerificationScreen() {
 
     try {
       setSubmitting(true);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      }
+
+      if (targetEmail && signUpData) {
+        await verifyEmailOtp(targetEmail, otp, signUpData);
+        router.replace('/(tabs)/feed');
+        return;
+      }
+
+      // Backward compatible phone flow fallback
       const rawPhone = params.targetPhone || signUpData?.phone || '';
       const cleanPhone = rawPhone.replace(/[^0-9]/g, '').slice(-10);
-
       const { isNewOrIncomplete } = await verifyPhoneOtp(cleanPhone, otp, signUpData || undefined);
 
       if (isNewOrIncomplete) {
@@ -71,18 +80,17 @@ export default function OtpVerificationScreen() {
     }
     setCooldown(30);
 
-    const rawPhone = params.targetPhone || signUpData?.phone || '';
-    const cleanPhone = rawPhone.replace(/[^0-9]/g, '').slice(-10);
-
     try {
-      if (signUpData) {
-        await requestRegistrationOtp(signUpData);
-      } else if (cleanPhone) {
+      if (targetEmail) {
+        await resendSignUpOtp(targetEmail);
+        island.info('Code Resent', `A fresh 6-digit confirmation code has been sent to ${targetEmail}`);
+      } else if (params.targetPhone) {
+        const cleanPhone = params.targetPhone.replace(/[^0-9]/g, '').slice(-10);
         await requestPhoneOtp(cleanPhone);
+        island.info('Code Resent', `A fresh 6-digit SMS verification code has been sent to ${displayTarget}`);
       }
-      island.info('Code Resent', `A fresh 6-digit SMS verification code has been sent to ${displayPhone}`);
     } catch (err: any) {
-      island.error('Resend Failed', err.message || 'Could not resend SMS OTP.');
+      island.error('Resend Failed', err.message || 'Could not resend verification code.');
     }
   };
 
@@ -119,16 +127,16 @@ export default function OtpVerificationScreen() {
           </View>
 
           <Text style={[styles.title, { color: tokens.textPrimary }]}>
-            Verify Phone
+            Verify Account
           </Text>
           <Text style={[styles.subtitle, { color: tokens.textSecondary }]}>
-            Enter the 6-digit code sent to{' '}
+            Enter the 6-digit confirmation code sent to{' '}
             <Text style={{ color: tokens.textPrimary, fontWeight: '500' }}>
-              {displayPhone}
+              {displayTarget}
             </Text>
           </Text>
 
-          {/* Demo / SMS Hint Banner */}
+          {/* Demo / Email Hint Banner */}
           <View
             style={[
               styles.demoHintBanner,
@@ -140,7 +148,7 @@ export default function OtpVerificationScreen() {
           >
             <Text style={[styles.demoHintText, { color: tokens.textMuted }]}>
               {isSupabaseConfigured
-                ? 'Check your phone SMS for the 6-digit code'
+                ? (targetEmail ? 'Check your email inbox or spam folder for the code' : 'Check your phone SMS for the 6-digit code')
                 : 'Demo mode code: 123456'}
             </Text>
           </View>
@@ -217,6 +225,7 @@ const styles = StyleSheet.create({
   card: {
     padding: 24,
     alignItems: 'center',
+    gap: 16,
   },
   iconBadge: {
     width: 44,
@@ -225,26 +234,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 14,
+    alignSelf: 'center',
   },
   title: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 6,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 13,
     lineHeight: 18,
     textAlign: 'center',
-    marginBottom: 14,
+    marginTop: -8,
   },
   demoHintBanner: {
     borderWidth: 1,
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    marginBottom: 14,
   },
   demoHintText: {
     fontSize: 11,
@@ -252,18 +259,18 @@ const styles = StyleSheet.create({
   },
   verifyButton: {
     width: '100%',
-    borderRadius: 8,
-    height: 46,
+    alignSelf: 'stretch',
+    borderRadius: 14,
+    height: 50,
+    paddingHorizontal: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 18,
   },
   verifyText: {
     fontSize: 14,
     fontWeight: '600',
   },
   resendContainer: {
-    marginTop: 16,
     alignItems: 'center',
   },
   cooldownText: {

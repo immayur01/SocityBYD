@@ -32,8 +32,9 @@ export const foodService = {
           .gt('portions_left', 0)
           .order('created_at', { ascending: false });
         if (!error && data) return data;
+        return [];
       } catch {
-        // fallback
+        return [];
       }
     }
     return localFoodListings.filter((dish) => (dish.portions_left ?? 0) > 0);
@@ -185,7 +186,27 @@ export const foodService = {
     return newOrder;
   },
 
-  async getUserOrders(): Promise<FoodOrder[]> {
+  async getUserOrders(userId?: string): Promise<FoodOrder[]> {
+    if (isSupabaseConfigured) {
+      try {
+        const uid = userId || (await getAuthenticatedUserId());
+        if (!uid) return [];
+        const { data, error } = await supabase
+          .from('food_orders')
+          .select('*, listing:food_listings(*)')
+          .eq('resident_id', uid)
+          .order('created_at', { ascending: false });
+        if (!error && data) {
+          return data.map((d: any) => ({
+            ...d,
+            dish: d.listing,
+          }));
+        }
+        return [];
+      } catch {
+        return [];
+      }
+    }
     return localOrders;
   },
 };

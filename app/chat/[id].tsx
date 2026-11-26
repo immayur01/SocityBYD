@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { KeyboardStickyView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Image } from 'expo-image';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
 import * as ImagePicker from 'expo-image-picker';
 import {
   ArrowLeft,
@@ -21,6 +22,7 @@ import {
   Smile,
   Phone,
   Video,
+  Lock,
 } from 'lucide-react-native';
 import { ChatBubble } from '@/components/ChatBubble';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
@@ -129,13 +131,10 @@ export default function DirectMessageDetailScreen() {
         </TouchableOpacity>
 
         <View style={styles.recipientInfo}>
-          <Image
-            source={{
-              uri:
-                recipient.avatar_url ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-            }}
-            style={styles.headerAvatar}
+          <ResidentAvatar
+            name={recipient.full_name}
+            avatarUrl={recipient.avatar_url}
+            size={38}
           />
           <View style={styles.headerTextCol}>
             <Text style={styles.recipientName}>{recipient.full_name}</Text>
@@ -163,6 +162,14 @@ export default function DirectMessageDetailScreen() {
         <FlashList
           ref={flashListRef}
           data={messages}
+          ListHeaderComponent={
+            <View style={styles.e2eeBanner}>
+              <Lock size={13} color="#00a884" />
+              <Text style={styles.e2eeBannerText}>
+                Messages are end-to-end encrypted. Only you and {recipient.full_name} can read them.
+              </Text>
+            </View>
+          }
           renderItem={({ item }) => (
             <ChatBubble
               message={item}
@@ -293,5 +300,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 6,
+  },
+  e2eeBanner: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 168, 132, 0.08)',
+    borderColor: 'rgba(0, 168, 132, 0.22)',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginVertical: 12,
+    maxWidth: '90%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  e2eeBannerText: {
+    fontSize: 11,
+    color: '#8696a0',
+    flexShrink: 1,
+    lineHeight: 15,
+    textAlign: 'center',
   },
 });

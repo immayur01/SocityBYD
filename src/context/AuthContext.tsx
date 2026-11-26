@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Session } from '@supabase/supabase-js';
-import { UserProfile, WingCode } from '@/types';
+import { UserProfile, WingCode, ResidentType } from '@/types';
 import { authService, SignUpData } from '@/services/auth';
 import { supabase, isSupabaseConfigured } from '@/services/supabase';
 import { notificationService } from '@/services/notifications';
+import { queryClient } from '@/lib/queryClient';
 import { useToast } from './ToastContext';
 import * as Linking from 'expo-linking';
+import { ensureUserKeyPair } from '@/lib/e2ee';
 
 interface AuthContextValue {
   user: UserProfile | null;
@@ -15,13 +17,16 @@ interface AuthContextValue {
   isProfileComplete: boolean;
   signInWithEmail: (email: string, pass: string, remember: boolean) => Promise<void>;
   signUpWithEmail: (data: SignUpData, pass: string) => Promise<void>;
+  verifyEmailOtp: (email: string, otp: string, signUpData: SignUpData) => Promise<void>;
+  resendSignUpOtp: (email: string) => Promise<void>;
+  resetPasswordForEmail: (email: string) => Promise<void>;
   signInWithPhone: (phone: string, pass: string, remember: boolean) => Promise<void>;
-  signInWithGoogle: () => Promise<{ isNewOrIncomplete: boolean }>;
+  signInWithGoogle: () => Promise<{ isNewOrIncomplete: boolean; resultUrl?: string }>;
   requestPhoneOtp: (phone: string) => Promise<{ phone: string; otpHint: string }>;
   requestRegistrationOtp: (data: SignUpData) => Promise<{ phone: string; otpHint: string }>;
   verifyPhoneOtp: (phone: string, otp: string, signUpData?: SignUpData) => Promise<{ isNewOrIncomplete: boolean }>;
   verifyOtpAndRegister: (data: SignUpData, otp: string) => Promise<void>;
-  completeProfile: (data: { full_name: string; wing: WingCode; flat_number: string; phone: string; email?: string }) => Promise<void>;
+  completeProfile: (data: { full_name: string; wing: WingCode; flat_number: string; phone: string; resident_type?: ResidentType; email?: string }) => Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
 }
@@ -37,7 +42,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAuthenticated = isSupabaseConfigured
     ? Boolean(user && session)
     : Boolean(user || session || authService.hasCachedSessionSync());
-  const isProfileComplete = Boolean(user && user.wing && user.flat_number && user.flat_number.trim().length > 0);
+  const isProfileComplete = Boolean(
+    user &&
+    user.full_name && user.full_name.trim().length > 0 &&
+    user.phone && user.phone.trim().length > 0 &&
+    user.wing && user.wing.trim().length > 0 &&
+    user.flat_number && user.flat_number.trim().length > 0
+  );
 
   // 1. Deep link listener for OAuth redirects
   useEffect(() => {
@@ -48,10 +59,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (url.includes('code=')) {
             const parsed = Linking.parse(url);
             const code = parsed.queryParams?.code;
-            if (typeof code === 'string') {
-              await supabase.auth.exchangeCodeForSession(code);
+            const codeStr = Array.isArray(code) ? code[0] : code;
+            if (typeof codeStr === 'string' && codeStr.length > 0) {
+              await supabase.auth.exchangeCodeForSession(codeStr);
             }
-          } else if (url.includes('access_token=')) {
+          } else if (url.includes('access_token=') || url.includes('#')) {
             const hash = url.split('#')[1] || url.split('?')[1] || '';
             const params = new URLSearchParams(hash);
             const access_token = params.get('access_token');
@@ -96,6 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setUser(profile);
               await authService.persistSession(profile);
               notificationService.registerForPushNotificationsAsync(profile.id).catch(() => {});
+              ensureUserKeyPair(profile.id).catch(() => {});
             }
           } else if (isMounted) {
             setSession(null);
@@ -155,6 +168,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (isMounted) setUser(existingProfile);
               await authService.persistSession(existingProfile);
               notificationService.registerForPushNotificationsAsync(existingProfile.id).catch(() => {});
+              ensureUserKeyPair(existingProfile.id).catch(() => {});
             } else {
               // Create partial profile from session metadata
               const meta = currentSession.user.user_metadata || {};
@@ -219,11 +233,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signUpWithEmail = async (data: SignUpData, pass: string) => {
     try {
-      const newUser = await authService.signUpWithEmail(data, pass);
-      setUser(newUser);
-      showToast('Account Created!', `Welcome to Ashtavinayak Empire, ${newUser.full_name}!`, 'success');
+      await authService.signUpWithEmail(data, pass);
+      showToast('Verification Code Sent', `A 6-digit confirmation code was sent to ${data.email}`, 'info');
     } catch (err: any) {
       showToast('Registration Error', err.message || 'Failed to create account.', 'error');
+      throw err;
+    }
+  };
+
+  const verifyEmailOtp = async (email: string, otp: string, signUpData: SignUpData) => {
+    try {
+      const newUser = await authService.verifyEmailOtp(email, otp, signUpData);
+      setUser(newUser);
+      if (isSupabaseConfigured) {
+        const { data: s } = await supabase.auth.getSession();
+        if (s?.session) setSession(s.session);
+      } else {
+        setSession({
+          access_token: 'session-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+          refresh_token: 'session-refresh',
+          user: {
+            id: newUser.id,
+            app_metadata: {},
+            user_metadata: {},
+            aud: 'authenticated',
+            created_at: newUser.created_at || new Date().toISOString(),
+          },
+        } as Session);
+      }
+      showToast('Account Verified!', `Welcome to Ashtavinayak Empire, ${newUser.full_name}!`, 'success');
+    } catch (err: any) {
+      showToast('Verification Failed', err.message || 'Incorrect verification code.', 'error');
+      throw err;
+    }
+  };
+
+  const resendSignUpOtp = async (email: string) => {
+    try {
+      await authService.resendSignUpOtp(email);
+      showToast('Code Resent', `A fresh 6-digit verification code was sent to ${email}`, 'info');
+    } catch (err: any) {
+      showToast('Resend Failed', err.message || 'Could not resend verification code.', 'error');
+      throw err;
+    }
+  };
+
+  const resetPasswordForEmail = async (email: string) => {
+    try {
+      await authService.resetPasswordForEmail(email);
+      showToast('Reset Link Dispatched', `Password reset instructions sent to ${email}`, 'success');
+    } catch (err: any) {
+      showToast('Reset Failed', err.message || 'Could not send reset email.', 'error');
       throw err;
     }
   };
@@ -252,28 +314,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signInWithGoogle = async (): Promise<{ isNewOrIncomplete: boolean }> => {
+  const signInWithGoogle = async (): Promise<{ isNewOrIncomplete: boolean; resultUrl?: string }> => {
     try {
-      const { user: authedUser, isNewOrIncomplete } = await authService.signInWithGoogle();
+      const { user: authedUser, isNewOrIncomplete, resultUrl } = await authService.signInWithGoogle();
       setUser(authedUser);
-      setSession({
-        access_token: 'session-token',
-        token_type: 'bearer',
-        expires_in: 3600,
-        refresh_token: 'session-refresh',
-        user: {
-          id: authedUser.id,
-          app_metadata: {},
-          user_metadata: {},
-          aud: 'authenticated',
-          created_at: authedUser.created_at || new Date().toISOString(),
-        },
-      } as Session);
+      if (isSupabaseConfigured) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session) {
+          setSession(sessionData.session);
+        }
+      } else {
+        setSession({
+          access_token: 'session-token',
+          token_type: 'bearer',
+          expires_in: 3600,
+          refresh_token: 'session-refresh',
+          user: {
+            id: authedUser.id,
+            app_metadata: {},
+            user_metadata: {},
+            aud: 'authenticated',
+            created_at: authedUser.created_at || new Date().toISOString(),
+          },
+        } as Session);
+      }
 
       if (!isNewOrIncomplete) {
         showToast('Google Sign In', `Welcome back, ${authedUser.full_name}!`, 'success');
       }
-      return { isNewOrIncomplete };
+      return { isNewOrIncomplete, resultUrl };
     } catch (err: any) {
       showToast('OAuth Error', err.message || 'Google Sign-In was cancelled or failed.', 'error');
       throw err;
@@ -341,6 +410,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     wing: WingCode;
     flat_number: string;
     phone: string;
+    resident_type?: ResidentType;
     email?: string;
   }) => {
     try {
@@ -358,6 +428,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await authService.signOut();
       setUser(null);
       setSession(null);
+      queryClient.clear();
       showToast('Signed Out', 'You have been securely signed out.', 'info');
     } catch (err: any) {
       showToast('Error', err.message || 'Could not sign out.', 'error');
@@ -385,6 +456,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isProfileComplete,
         signInWithEmail,
         signUpWithEmail,
+        verifyEmailOtp,
+        resendSignUpOtp,
+        resetPasswordForEmail,
         signInWithPhone,
         signInWithGoogle,
         requestPhoneOtp,

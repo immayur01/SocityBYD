@@ -9,6 +9,7 @@ import {
 import { uploadMediaToR2 } from './storage';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { getAuthenticatedUserId } from './auth';
+import { encryptDM, decryptDM, getLocalSecretKey } from '@/lib/e2ee';
 
 export interface FetchMessagesParams {
   roomType: 'community' | 'dm';
@@ -166,7 +167,21 @@ export const chatService = {
 
         const { data, error } = await query;
         if (!error && data) {
-          const chronological = [...data].reverse();
+          // Decrypt E2EE DM messages
+          let processedData = data;
+          if (roomType === 'dm' && currentUserId) {
+            const mySecretKey = await getLocalSecretKey(currentUserId);
+            processedData = data.map((msg: any) => {
+              if (msg.is_encrypted && msg.text) {
+                return {
+                  ...msg,
+                  text: decryptDM(msg.text, msg.sender_public_key, mySecretKey),
+                };
+              }
+              return msg;
+            });
+          }
+          const chronological = [...processedData].reverse();
           const nextCursor = data.length === limit ? data[data.length - 1].created_at : null;
           return { messages: chronological, nextCursor };
         }
@@ -222,15 +237,36 @@ export const chatService = {
 
     if (isSupabaseConfigured) {
       try {
+        // E2EE: encrypt DM messages if recipient has a public key and we have a secret key
+        let messageText = newMessage.text;
+        let isEncrypted = false;
+        let senderPublicKey: string | null = null;
+
+        if (roomType === 'dm' && recipientId && currentUserId) {
+          const [recipientProfile, mySecretKey] = await Promise.all([
+            supabase.from('profiles').select('public_key').eq('id', recipientId).single(),
+            getLocalSecretKey(currentUserId),
+          ]);
+          const recipientPubKey = (recipientProfile as any).data?.public_key;
+          if (recipientPubKey && mySecretKey) {
+            const encrypted = encryptDM(newMessage.text, recipientPubKey, mySecretKey);
+            messageText = encrypted.cipherText;
+            senderPublicKey = encrypted.senderPublicKey;
+            isEncrypted = true;
+          }
+        }
+
         const { data, error } = await supabase.from('messages').insert({
           room_type: newMessage.room_type,
           room_id: newMessage.room_id,
           sender_id: currentUserId,
           recipient_id: newMessage.recipient_id || null,
-          text: newMessage.text,
+          text: messageText,
           media_url: newMessage.media_url || null,
           reactions: newMessage.reactions,
           is_read: newMessage.is_read,
+          is_encrypted: isEncrypted,
+          sender_public_key: senderPublicKey,
         }).select('*, sender:profiles(*)').single();
 
         if (error) {
@@ -406,6 +442,22 @@ export const chatService = {
               ...enriched,
               sender: senderProfile,
             };
+          }
+
+          // E2EE: decrypt realtime DM messages
+          if (
+            enriched.room_type === 'dm' &&
+            (enriched as any).is_encrypted &&
+            enriched.text
+          ) {
+            const currentUserId = await getAuthenticatedUserId();
+            if (currentUserId) {
+              const mySecretKey = await getLocalSecretKey(currentUserId);
+              enriched = {
+                ...enriched,
+                text: decryptDM(enriched.text, (enriched as any).sender_public_key, mySecretKey),
+              };
+            }
           }
 
           callback({

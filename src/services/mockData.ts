@@ -15,6 +15,8 @@ export const CURRENT_USER: UserProfile = {
   phone: '+91 98765 43210',
   email: 'mayur.patil@ashtavinayak.org',
   role: 'resident',
+  resident_type: 'owner',
+  verification_status: 'approved',
   bio: 'Living in Wing B since 2021. Love weekend badminton & society gardening!',
   avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   created_at: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),

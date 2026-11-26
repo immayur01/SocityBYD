@@ -23,9 +23,16 @@ import {
   X,
   Phone,
   CheckCircle2,
+  Camera,
+  Trash2,
+  Image as ImageIcon,
 } from 'lucide-react-native';
 import { GlassCard } from '@/components/GlassCard';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadMediaToR2 } from '@/services/storage';
+import { queryClient } from '@/lib/queryClient';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { island } from '@/context/IslandContext';
@@ -37,25 +44,10 @@ import { useMyPosts, useMyOrders, useMyTickets } from '@/hooks/queries/useProfil
 import { FoodOrder, Complaint, Post } from '@/types';
 import * as Haptics from 'expo-haptics';
 
-const WING_BUILDING_MAP: Record<string, string> = {
-  'Wing A': 'Chintamani',
-  'Wing B': 'Mayureshwar',
-  'Wing C': 'Chintamani',
-  'Wing D': 'Girijatmak',
-  'Wing E': 'Vighnahar',
-  'Wing F': 'Mahaganapati',
-  'Wing G': 'Varadavinayak',
-  'Wing H': 'Ballaleshwar',
-  'Wing I': 'Chintamani',
-  'Wing J': 'Mayureshwar',
-  'Wing K': 'Siddhivinayak',
-  'Wing L': 'Varadavinayak',
-};
-
 function getBuildingFlat(wing?: string, flatNumber?: string): string {
-  const building = (wing && WING_BUILDING_MAP[wing]) || wing || 'Chintamani';
+  const w = wing?.trim() || 'Wing B';
   const flat = flatNumber ? ` · ${flatNumber.trim()}` : '';
-  return `${building}${flat}`;
+  return `${w}${flat}`;
 }
 
 export default function ProfileScreen() {
@@ -66,7 +58,7 @@ export default function ProfileScreen() {
   const { tokens, isDark } = useTheme();
 
   // Active sub-tab: 'posts' | 'orders' | 'tickets'
-  const [activeSubTab, setActiveSubTab] = useState<'posts' | 'orders' | 'tickets'>('orders');
+  const [activeSubTab, setActiveSubTab] = useState<'posts' | 'orders' | 'tickets'>('posts');
 
   // React Query cached user records
   const { data: myPosts = [], isLoading: loadingPosts, refetch: refetchPosts } = useMyPosts();
@@ -86,6 +78,69 @@ export default function ProfileScreen() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState(user?.full_name || '');
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // Avatar DP management
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showAvatarSheet, setShowAvatarSheet] = useState(false);
+
+  const handlePickAvatar = async () => {
+    setShowAvatarSheet(false);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        island.error('Permission Required', 'Please allow photo access to update your profile photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets || !result.assets[0]?.uri) {
+        return;
+      }
+
+      const localUri = result.assets[0].uri;
+      setUploadingAvatar(true);
+      island.loading('Uploading Photo', 'Saving your new profile picture...');
+
+      const publicUrl = await uploadMediaToR2(localUri, 'avatars', 'image/jpeg');
+      await updateProfile({ avatar_url: publicUrl });
+
+      // Invalidate React Query caches so all resident screens update immediately
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['food'] });
+      queryClient.invalidateQueries({ queryKey: ['complaints'] });
+
+      island.success('Photo Updated', 'Your profile photo has been updated.');
+    } catch (err: any) {
+      island.error('Upload Failed', err?.message || 'Could not upload photo.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setShowAvatarSheet(false);
+    try {
+      setUploadingAvatar(true);
+      island.loading('Removing Photo', 'Resetting to initials avatar...');
+      await updateProfile({ avatar_url: '' });
+
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['food'] });
+      queryClient.invalidateQueries({ queryKey: ['complaints'] });
+
+      island.success('Photo Removed', 'Your profile photo has been removed.');
+    } catch (err: any) {
+      island.error('Action Failed', err?.message || 'Could not remove photo.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!editName.trim()) {
@@ -160,25 +215,26 @@ export default function ProfileScreen() {
         {/* Resident Profile Card */}
         <GlassCard style={styles.profileCard}>
           <View style={styles.avatarRow}>
-            <Image
-              source={{
-                uri:
-                  user?.avatar_url ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200',
-              }}
-              style={[styles.avatar, { borderColor: tokens.borderSubtle }]}
-            />
+            <View style={styles.avatarWrapper}>
+              <ResidentAvatar
+                name={user?.full_name}
+                avatarUrl={user?.avatar_url}
+                size={84}
+                borderWidth={2}
+                borderColor={isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)'}
+                showEditBadge
+                isLoading={uploadingAvatar}
+                onPress={() => setShowAvatarSheet(true)}
+              />
+            </View>
 
             <View style={styles.profileMeta}>
-              <Text style={[styles.fullName, { color: tokens.textPrimary }]}>
+              <Text style={[styles.fullName, { color: tokens.textPrimary }]} numberOfLines={1}>
                 {user?.full_name || 'Resident'}
               </Text>
 
               <Text style={[styles.flatText, { color: tokens.textSecondary }]}>
                 {getBuildingFlat(user?.wing, user?.flat_number)}
-              </Text>
-              <Text style={[styles.roleText, { color: tokens.textMuted }]}>
-                {user?.role ? user.role.toUpperCase() : 'RESIDENT'}
               </Text>
             </View>
           </View>
@@ -194,7 +250,7 @@ export default function ProfileScreen() {
             ]}
           >
             <View style={styles.contactRow}>
-              <Phone size={13} color={tokens.textMuted} strokeWidth={1.5} />
+              <Phone size={14} color={tokens.textMuted} strokeWidth={1.5} />
               <Text style={[styles.contactText, { color: tokens.textSecondary }]}>
                 {user?.phone || '+91 98765 43210'}
               </Text>
@@ -216,7 +272,7 @@ export default function ProfileScreen() {
             }}
             activeOpacity={0.8}
           >
-            <Edit3 size={14} color={tokens.textPrimary} strokeWidth={1.5} />
+            <Edit3 size={15} color={tokens.textPrimary} strokeWidth={1.5} />
             <Text style={[styles.editProfileText, { color: tokens.textPrimary }]}>Edit Profile</Text>
           </TouchableOpacity>
         </GlassCard>
@@ -513,6 +569,78 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       )}
+
+      {/* Avatar Options Modal */}
+      {showAvatarSheet && (
+        <Modal
+          visible={true}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setShowAvatarSheet(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowAvatarSheet(false)}
+          >
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: isDark ? '#121214' : '#FFFFFF',
+                  borderColor: tokens.borderSubtle,
+                },
+              ]}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: tokens.textPrimary }]}>
+                  Profile Photo
+                </Text>
+                <TouchableOpacity onPress={() => setShowAvatarSheet(false)}>
+                  <X size={18} color={tokens.textMuted} strokeWidth={1.5} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.sheetActionBtn,
+                  {
+                    backgroundColor: isDark ? '#18181B' : '#F4F4F5',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ]}
+                onPress={handlePickAvatar}
+                activeOpacity={0.75}
+              >
+                <Camera size={18} color={tokens.textPrimary} strokeWidth={1.5} />
+                <Text style={[styles.sheetActionText, { color: tokens.textPrimary }]}>
+                  Choose New Photo
+                </Text>
+              </TouchableOpacity>
+
+              {!!user?.avatar_url && (
+                <TouchableOpacity
+                  style={[
+                    styles.sheetActionBtn,
+                    {
+                      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : '#FEE2E2',
+                      borderColor: isDark ? 'rgba(239, 68, 68, 0.25)' : '#FECACA',
+                      marginTop: 10,
+                    },
+                  ]}
+                  onPress={handleRemoveAvatar}
+                  activeOpacity={0.75}
+                >
+                  <Trash2 size={18} color="#ef4444" strokeWidth={1.5} />
+                  <Text style={[styles.sheetActionText, { color: '#ef4444' }]}>
+                    Remove Photo
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -544,70 +672,83 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   profileCard: {
-    padding: 16,
-    marginBottom: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderRadius: 18,
+    gap: 14,
   },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 18,
+    paddingBottom: 10,
+    marginBottom: 6,
   },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 1,
-    marginRight: 14,
+  avatarWrapper: {
+    position: 'relative',
   },
   profileMeta: {
     flex: 1,
+    gap: 4,
+    marginLeft: 2,
   },
   fullName: {
-    fontSize: 17,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   flatText: {
     fontSize: 13,
     fontWeight: '500',
-    marginTop: 4,
   },
-  roleText: {
-    fontSize: 11,
-    fontWeight: '400',
+  roleBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
     marginTop: 2,
   },
+  roleText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
   contactDetails: {
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
-    padding: 12,
-    marginTop: 14,
-    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 18,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
   contactText: {
-    fontSize: 12,
-    marginLeft: 8,
+    fontSize: 13,
+    fontWeight: '500',
   },
   editProfileBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 10,
+    borderRadius: 12,
+    height: 48,
+    marginTop: 14,
+    gap: 8,
   },
   editProfileText: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginLeft: 6,
+    fontSize: 13.5,
+    fontWeight: '600',
   },
   subTabsContainer: {
     flexDirection: 'row',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 4,
-    marginBottom: 16,
+    marginBottom: 20,
     borderWidth: 1,
   },
   subTab: {
@@ -615,8 +756,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: 8,
+    height: 40,
+    borderRadius: 9,
   },
   subTabActive: {
     borderWidth: 1,
@@ -693,9 +834,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 12,
-    marginTop: 8,
+    borderRadius: 14,
+    height: 48,
+    marginTop: 12,
+    gap: 8,
   },
   signOutBtnText: {
     color: '#ef4444',
@@ -750,6 +892,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   saveText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  sheetActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  sheetActionText: {
     fontSize: 14,
     fontWeight: '600',
   },

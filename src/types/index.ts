@@ -13,6 +13,8 @@ export type WingCode =
   | 'Wing L';
 
 export type UserRole = 'resident' | 'committee' | 'admin' | 'security';
+export type ResidentType = 'owner' | 'tenant';
+export type VerificationStatus = 'pending' | 'approved' | 'rejected';
 
 export interface UserProfile {
   id: string;
@@ -22,9 +24,12 @@ export interface UserProfile {
   phone: string;
   email: string;
   role: UserRole;
+  resident_type?: ResidentType;
+  verification_status?: VerificationStatus;
   bio?: string;
   avatar_url?: string;
   expo_push_token?: string;
+  public_key?: string;
   created_at: string;
 }
 
@@ -145,6 +150,8 @@ export interface ChatMessage {
   media_url?: string;
   reactions: Record<string, string[]>; // e.g., { "❤️": ["user-1"], "👍": ["user-2"] }
   is_read?: boolean;
+  is_encrypted?: boolean;
+  sender_public_key?: string;
   created_at: string;
   sender?: UserProfile;
 }

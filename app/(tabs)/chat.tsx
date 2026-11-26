@@ -17,6 +17,7 @@ import {
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import {
@@ -55,7 +56,7 @@ import { UnreadBadge, formatBadgeCount } from '@/components/UnreadBadge';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { chatService } from '@/services/chat';
-import { isSupabaseConfigured } from '@/services/supabase';
+import { supabase, isSupabaseConfigured } from '@/services/supabase';
 
 // Enable LayoutAnimation for smooth WhatsApp-style thread reordering on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -545,12 +546,22 @@ export default function ChatScreen() {
 
   // Data state: Community channels keep a fixed structure; Direct messages use WhatsApp-style recency sorting
   const [wingGroup, setWingGroup] = useState<ChannelGroup>(() =>
-    createWingGroupData('Chintamani', '303')
+    createWingGroupData(user?.wing || 'Wing B', user?.flat_number || '')
   );
-  const [communities, setCommunities] = useState<ChannelGroup[]>(INITIAL_UNIVERSAL_CHANNELS);
-  const [dms, setDms] = useState<DmThread[]>(() => sortByMostRecent(INITIAL_DMS));
-  const [dmRequests, setDmRequests] = useState<DmRequestItem[]>(INITIAL_DM_REQUESTS);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(INITIAL_NOTIFICATIONS);
+  const [communities, setCommunities] = useState<ChannelGroup[]>(() => {
+    if (isSupabaseConfigured) {
+      return INITIAL_UNIVERSAL_CHANNELS.map((c) => ({
+        ...c,
+        unread: 0,
+        messages: [],
+      }));
+    }
+    return INITIAL_UNIVERSAL_CHANNELS;
+  });
+  const [dms, setDms] = useState<DmThread[]>(() => (isSupabaseConfigured ? [] : sortByMostRecent(INITIAL_DMS)));
+  const [dmRequests, setDmRequests] = useState<DmRequestItem[]>(() => (isSupabaseConfigured ? [] : INITIAL_DM_REQUESTS));
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => (isSupabaseConfigured ? [] : INITIAL_NOTIFICATIONS));
+  const [liveResidents, setLiveResidents] = useState<ResidentMember[]>([]);
 
   // Composer & 2-second hold reaction state
   const [messageText, setMessageText] = useState('');
@@ -615,35 +626,61 @@ export default function ChatScreen() {
 
     // 1. Initial hydration from Supabase
     chatService.fetchMessages({ roomType: 'community', roomId: 'community', limit: 30 }).then(({ messages: liveMsgs }) => {
-      if (liveMsgs.length > 0) {
-        setCommunities((prev) =>
-          prev.map((c) => {
-            if (c.id === 'comm-general' || c.id === 'general' || c.id === 'community') {
-              const mapped = liveMsgs.map((raw) => ({
-                id: raw.id,
-                senderId: raw.sender_id === (user?.id || 'usr-current-1') ? 'me' : raw.sender_id,
-                senderName: raw.sender?.full_name || 'Resident',
-                flat: raw.sender ? `${raw.sender.wing} ${raw.sender.flat_number}` : '',
-                text: raw.text,
-                time: new Date(raw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                status: (raw.is_read ? 'read' : 'delivered') as 'read' | 'delivered',
-                reactions: Object.fromEntries(
-                  Object.entries(raw.reactions || {}).map(([emoji, userIds]) => [emoji, (userIds as string[]).length])
-                ),
-                userReacted: Object.entries(raw.reactions || {})
-                  .filter(([_, userIds]) => (userIds as string[]).includes(user?.id || 'usr-current-1'))
-                  .map(([emoji]) => emoji),
-                attachment: raw.media_url
-                  ? { type: (raw.media_url.endsWith('.pdf') ? 'file' : 'image') as 'file' | 'image', uri: raw.media_url, name: 'attachment' }
-                  : undefined,
-              }));
-              return { ...c, messages: mapped };
-            }
-            return c;
-          })
-        );
-      }
+      setCommunities((prev) =>
+        prev.map((c) => {
+          if (c.id === 'comm-general' || c.id === 'general' || c.id === 'community') {
+            const mapped = liveMsgs.map((raw) => ({
+              id: raw.id,
+              senderId: raw.sender_id === (user?.id || 'usr-current-1') ? 'me' : raw.sender_id,
+              senderName: raw.sender?.full_name || 'Resident',
+              flat: raw.sender ? `${raw.sender.wing} ${raw.sender.flat_number}` : '',
+              text: raw.text,
+              time: new Date(raw.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              status: (raw.is_read ? 'read' : 'delivered') as 'read' | 'delivered',
+              reactions: Object.fromEntries(
+                Object.entries(raw.reactions || {}).map(([emoji, userIds]) => [emoji, (userIds as string[]).length])
+              ),
+              userReacted: Object.entries(raw.reactions || {})
+                .filter(([_, userIds]) => (userIds as string[]).includes(user?.id || 'usr-current-1'))
+                .map(([emoji]) => emoji),
+              attachment: raw.media_url
+                ? { type: (raw.media_url.endsWith('.pdf') ? 'file' : 'image') as 'file' | 'image', uri: raw.media_url, name: 'attachment' }
+                : undefined,
+            }));
+            return { ...c, messages: mapped };
+          }
+          return c;
+        })
+      );
     });
+
+    // 1b. Fetch real resident directory from Supabase profiles
+    supabase
+      .from('profiles')
+      .select('id, full_name, wing, flat_number, role, phone, avatar_url')
+      .then((res: any) => {
+        const profilesData = res.data;
+        if (profilesData && profilesData.length > 0) {
+          const mappedResidents: ResidentMember[] = profilesData.map((p: any) => ({
+            id: p.id,
+            name: p.full_name || 'Resident',
+            building: p.wing || 'Wing B',
+            flat: p.flat_number || '',
+            role: p.role === 'admin' ? 'Admin' : 'Resident',
+            phone: (p.phone || '').replace(/\D/g, '').slice(-10),
+            dob: '',
+            online: true,
+            avatarColor: '#18181B',
+            initials: (p.full_name || 'R')
+              .split(' ')
+              .map((w: string) => w[0])
+              .join('')
+              .toUpperCase()
+              .slice(0, 2),
+          }));
+          setLiveResidents(mappedResidents);
+        }
+      });
 
     // 2. Realtime WebSocket subscription
     const unsubscribe = chatService.subscribeToMessages((event) => {
@@ -1163,10 +1200,11 @@ export default function ChatScreen() {
   const trimmedSearch = dmSearchQuery.trim();
   const digitsOnly = trimmedSearch.replace(/\D/g, '');
   const isExactPhone = digitsOnly.length === 10;
+  const directorySource = isSupabaseConfigured && liveResidents.length > 0 ? liveResidents : (isSupabaseConfigured ? [] : SOCIETY_MEMBERS_DB);
   const matchedResidents =
     trimmedSearch.length < 2
       ? []
-      : SOCIETY_MEMBERS_DB.filter((member) => {
+      : directorySource.filter((member) => {
           if (isExactPhone) return member.phone === digitsOnly;
           if (/^\d+$/.test(trimmedSearch)) return false;
           return member.name.toLowerCase().includes(trimmedSearch.toLowerCase());
@@ -1544,9 +1582,12 @@ export default function ChatScreen() {
                   onPress={() => { setActiveDmId(dm.id); setDms((prev) => prev.map((d) => d.id === dm.id ? { ...d, unread: 0 } : d)); }}
                   style={[styles.cardBox, { backgroundColor: colors.card, borderColor: colors.border }]}
                 >
-                  <View style={[styles.avatarSquare, { backgroundColor: dm.resident.avatarColor }]}>
-                    <Text style={styles.avatarText}>{dm.resident.initials}</Text>
-                  </View>
+                  <ResidentAvatar
+                    name={dm.resident.name}
+                    size={44}
+                    borderRadius={10}
+                    style={{ marginRight: 12 }}
+                  />
                   <View style={{ flex: 1 }}>
                     <View style={styles.rowBetween}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1593,10 +1634,12 @@ export default function ChatScreen() {
         <View style={{ flex: 1 }}>
           <View style={[styles.subHeader, { backgroundColor: colors.card, borderBottomColor: colors.border, justifyContent: 'space-between' }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
-              <View style={[styles.smallSquircle, { backgroundColor: activeDm?.resident.avatarColor }]}>
-                <Text style={styles.avatarText}>{activeDm?.resident.initials}</Text>
-              </View>
-              <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+              <ResidentAvatar
+                name={activeDm?.resident.name}
+                size={34}
+                borderRadius={8}
+              />
+              <Text style={[styles.cardTitle, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>
                 {activeDm?.resident.name}
               </Text>
             </View>
@@ -1605,6 +1648,7 @@ export default function ChatScreen() {
               style={[
                 styles.flatTag,
                 {
+                  flexShrink: 0,
                   backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
                   borderColor: colors.border,
                   borderWidth: 1,
@@ -1621,6 +1665,29 @@ export default function ChatScreen() {
           </View>
 
           <ScrollView ref={scrollViewRef} contentContainerStyle={styles.chatScroll} onScrollBeginDrag={() => setActiveReactionMsgId(null)}>
+            {activeDm && (
+              <View
+                style={{
+                  alignSelf: 'center',
+                  backgroundColor: isDark ? 'rgba(16, 185, 129, 0.08)' : 'rgba(16, 185, 129, 0.1)',
+                  borderColor: isDark ? 'rgba(16, 185, 129, 0.2)' : 'rgba(16, 185, 129, 0.25)',
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  marginBottom: 16,
+                  maxWidth: '92%',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Lock size={13} color="#10b981" />
+                <Text style={{ fontSize: 11, color: colors.subText, flexShrink: 1, lineHeight: 15, textAlign: 'center' }}>
+                  Messages are end-to-end encrypted. Only you and {activeDm.resident.name} can read them.
+                </Text>
+              </View>
+            )}
             {activeDm?.messages.map((msg) => {
               const isMe = msg.senderId === 'me';
               const isPickerOpen = activeReactionMsgId === msg.id;
@@ -1931,9 +1998,12 @@ export default function ChatScreen() {
             <ScrollView>
               {matchedResidents.map((res) => (
                 <View key={res.id} style={[styles.cardBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={[styles.avatarSquare, { backgroundColor: res.avatarColor }]}>
-                    <Text style={styles.avatarText}>{res.initials}</Text>
-                  </View>
+                  <ResidentAvatar
+                    name={res.name}
+                    size={40}
+                    borderRadius={10}
+                    style={{ marginRight: 12 }}
+                  />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.cardTitle, { color: colors.text }]}>{res.name} ({res.building} {res.flat})</Text>
                     <Text style={{ fontSize: 11, color: colors.subText }}>Contact & Birthdate Hidden</Text>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Modal,
   FlatList,
   Platform,
+  BackHandler,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   ArrowRight,
   ShieldCheck,
+  LogOut,
 } from 'lucide-react-native';
 import { GlassCard } from '@/components/GlassCard';
 import { GlassInput } from '@/components/GlassInput';
@@ -26,7 +28,7 @@ import { ShimmerTitle } from '@/components/ShimmerTitle';
 import { useAuth } from '@/context/AuthContext';
 import { island } from '@/context/IslandContext';
 import { useTheme } from '@/context/ThemeContext';
-import { WingCode } from '@/types';
+import { WingCode, ResidentType } from '@/types';
 import * as Haptics from 'expo-haptics';
 
 const WINGS: WingCode[] = [
@@ -46,15 +48,28 @@ const WINGS: WingCode[] = [
 
 export default function CompleteProfileScreen() {
   const router = useRouter();
-  const { user, completeProfile } = useAuth();
+  const { user, completeProfile, signOut } = useAuth();
   const { tokens, isDark } = useTheme();
 
   const [fullName, setFullName] = useState(user?.full_name || '');
   const [selectedWing, setSelectedWing] = useState<WingCode>(user?.wing || 'Wing B');
   const [flatNumber, setFlatNumber] = useState(user?.flat_number || '');
   const [phone, setPhone] = useState(user?.phone?.replace('+91', '').trim() || '');
+  const [residentType, setResidentType] = useState<ResidentType>(user?.resident_type || 'owner');
   const [showWingModal, setShowWingModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Disable hardware back button on Android so incomplete profile cannot be bypassed
+  useEffect(() => {
+    const onBackPress = () => true;
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, []);
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace('/(auth)/login');
+  };
 
   const handleComplete = async () => {
     if (submitting) return;
@@ -84,6 +99,7 @@ export default function CompleteProfileScreen() {
         wing: selectedWing,
         flat_number: flatNumber.trim(),
         phone: cleanPhone,
+        resident_type: residentType,
         email: user?.email,
       });
 
@@ -103,7 +119,18 @@ export default function CompleteProfileScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Header Icon */}
+        {/* Header Icon & Sign Out */}
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.signOutBtn}
+            onPress={handleSignOut}
+            activeOpacity={0.7}
+          >
+            <LogOut size={14} color={tokens.textSecondary} />
+            <Text style={[styles.signOutText, { color: tokens.textSecondary }]}>Sign Out</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.header}>
           <View
             style={[
@@ -127,7 +154,7 @@ export default function CompleteProfileScreen() {
           {/* Full Name */}
           <GlassInput
             label="Full Name"
-            placeholder="e.g. Mayur Patil"
+            placeholder=""
             value={fullName}
             onChangeText={setFullName}
             leftIcon={<User size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
@@ -163,7 +190,7 @@ export default function CompleteProfileScreen() {
           {/* Flat Number */}
           <GlassInput
             label="Flat Number"
-            placeholder="e.g. 402"
+            placeholder=""
             value={flatNumber}
             onChangeText={setFlatNumber}
             leftIcon={<Home size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
@@ -173,13 +200,71 @@ export default function CompleteProfileScreen() {
           {/* Phone Number */}
           <GlassInput
             label="Phone Number"
-            placeholder="10-digit mobile number"
+            placeholder=""
             value={phone}
             onChangeText={setPhone}
             leftIcon={<Phone size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
             keyboardType="phone-pad"
             maxLength={10}
           />
+
+          {/* Resident Type Selector (Owner vs Tenant) */}
+          <View style={{ marginBottom: 18 }}>
+            <Text style={[styles.inputLabel, { color: tokens.textPrimary, marginBottom: 8 }]}>
+              Resident Type
+            </Text>
+            <View style={styles.residentTypeRow}>
+              <TouchableOpacity
+                style={[
+                  styles.residentTypeBtn,
+                  residentType === 'owner' && {
+                    backgroundColor: isDark ? '#FFFFFF' : '#111111',
+                    borderColor: isDark ? '#FFFFFF' : '#111111',
+                  },
+                  residentType !== 'owner' && {
+                    backgroundColor: isDark ? '#161616' : '#F4F4F5',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ]}
+                onPress={() => setResidentType('owner')}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.residentTypeBtnText,
+                    { color: residentType === 'owner' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textSecondary },
+                  ]}
+                >
+                  Owner
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.residentTypeBtn,
+                  residentType === 'tenant' && {
+                    backgroundColor: isDark ? '#FFFFFF' : '#111111',
+                    borderColor: isDark ? '#FFFFFF' : '#111111',
+                  },
+                  residentType !== 'tenant' && {
+                    backgroundColor: isDark ? '#161616' : '#F4F4F5',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ]}
+                onPress={() => setResidentType('tenant')}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.residentTypeBtnText,
+                    { color: residentType === 'tenant' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textSecondary },
+                  ]}
+                >
+                  Tenant
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* Submit CTA */}
           <TouchableOpacity
@@ -273,9 +358,43 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 50,
     paddingBottom: 40,
     alignItems: 'center',
+  },
+  topBar: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 8,
+  },
+  signOutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  signOutText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  residentTypeRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  residentTypeBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  residentTypeBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   header: {
     alignItems: 'center',

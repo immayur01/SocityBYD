@@ -727,8 +727,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   modalSubmitBtn: {
-    height: 44,
-    borderRadius: 12,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 20,

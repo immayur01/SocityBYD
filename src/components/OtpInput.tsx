@@ -86,9 +86,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     paddingVertical: 12,
+    gap: 8,
   },
   box: {
-    width: 48,
+    flex: 1,
     height: 52,
     borderRadius: 8,
     borderWidth: 1,

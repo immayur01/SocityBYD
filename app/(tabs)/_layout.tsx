@@ -9,16 +9,27 @@ import { FloatingDock, TabKey } from '@/components/FloatingDock';
 import { ProgressiveBlurEdge } from '@/components/ProgressiveBlurEdge';
 import { CreatePostModal } from '@/components/CreatePostModal';
 import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export default function TabsLayout() {
   const router = useRouter();
   const pathname = usePathname();
   const { tokens, theme } = useTheme();
+  const { isAuthenticated, isProfileComplete, loading } = useAuth();
 
   // Create Post bottom sheet state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const segments = useSegments();
+
+  React.useEffect(() => {
+    if (loading) return;
+    if (!isAuthenticated) {
+      router.replace('/(auth)/login');
+    } else if (!isProfileComplete) {
+      router.replace('/(auth)/complete-profile');
+    }
+  }, [isAuthenticated, isProfileComplete, loading, router]);
 
   // Determine active tab from pathname (segments typing is strict in SDK 52)
   const getActiveTab = (): TabKey => {
@@ -34,6 +45,10 @@ export default function TabsLayout() {
   const handleSelectTab = (tab: TabKey) => {
     router.replace(`/(tabs)/${tab}` as any);
   };
+
+  if (loading || !isAuthenticated || !isProfileComplete) {
+    return <View style={[styles.container, { backgroundColor: tokens.bgApp }]} />;
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: tokens.bgApp }]}>

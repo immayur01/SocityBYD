@@ -1,8 +1,9 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { UserProfile, WingCode } from '@/types';
+import { UserProfile, WingCode, ResidentType } from '@/types';
 import { CURRENT_USER } from './mockData';
 import * as SecureStore from 'expo-secure-store';
 import { uploadMediaToR2 } from './storage';
+import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -15,6 +16,7 @@ export interface SignUpData {
   phone: string;
   email: string;
   password?: string;
+  resident_type?: ResidentType;
 }
 
 // In-memory session holder
@@ -133,61 +135,134 @@ export const authService = {
   },
 
   /**
-   * Sign Up with Email and Password
+   * Sign Up with Email and Password (dispatches 6-digit Email OTP)
    */
-  async signUpWithEmail(data: SignUpData, password: string): Promise<UserProfile> {
+  async signUpWithEmail(data: SignUpData, password: string): Promise<void> {
     const formattedPhone = formatIndianPhone(data.phone);
 
     if (isSupabaseConfigured) {
       const { data: authData, error } = await supabase.auth.signUp({
-        email: data.email,
+        email: data.email.trim().toLowerCase(),
         password,
         options: {
           data: {
-            full_name: data.full_name,
+            full_name: data.full_name.trim(),
             wing: data.wing,
-            flat_number: data.flat_number,
+            flat_number: data.flat_number.trim(),
             phone: formattedPhone,
+            resident_type: data.resident_type || 'owner',
           },
         },
       });
 
       if (error) throw new Error(error.message);
 
-      const userId = authData.user?.id || `usr-${Date.now()}`;
-      const newProfile: UserProfile = {
+      // When an account already exists with this email, Supabase Auth returns an empty identities array
+      // to avoid leaking existence, but does not send an OTP email.
+      if (authData.user && authData.user.identities && authData.user.identities.length === 0) {
+        throw new Error('An account with this email already exists. Please Sign In instead.');
+      }
+      return;
+    }
+  },
+
+  /**
+   * Verify 6-digit Email OTP for Sign Up
+   */
+  async verifyEmailOtp(
+    email: string,
+    token: string,
+    signUpData: SignUpData
+  ): Promise<UserProfile> {
+    const formattedPhone = formatIndianPhone(signUpData.phone);
+
+    if (isSupabaseConfigured) {
+      const { data: authRes, error } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: token.trim(),
+        type: 'signup',
+      });
+
+      if (error) throw new Error(error.message);
+
+      const userId = authRes.user?.id || (await supabase.auth.getUser()).data.user?.id;
+      if (!userId) throw new Error('Verification succeeded but user session could not be established.');
+
+      const fullProfile: UserProfile = {
         id: userId,
-        full_name: data.full_name,
-        wing: data.wing,
-        flat_number: data.flat_number,
+        full_name: signUpData.full_name.trim(),
+        wing: signUpData.wing,
+        flat_number: signUpData.flat_number.trim(),
         phone: formattedPhone,
-        email: data.email,
+        email: email.trim().toLowerCase(),
         role: 'resident',
-        bio: `Resident of ${data.wing}, Flat ${data.flat_number}`,
+        resident_type: signUpData.resident_type || 'owner',
+        verification_status: 'approved',
+        bio: `Resident of ${signUpData.wing}, Flat ${signUpData.flat_number.trim()}`,
         avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         created_at: new Date().toISOString(),
       };
 
-      await supabase.from('profiles').upsert(newProfile);
-      await this.persistSession(newProfile);
-      return newProfile;
+      const { error: upsertErr } = await supabase.from('profiles').upsert(fullProfile);
+      if (upsertErr) throw new Error(upsertErr.message);
+
+      await this.persistSession(fullProfile);
+      return fullProfile;
     }
 
-    // Demo fallback
-    const newProfile: UserProfile = {
+    // Demo / Offline fallback: only allowed when isSupabaseConfigured is FALSE
+    if (token !== '123456' && token.length !== 6) {
+      throw new Error('Invalid OTP code. In demo mode, enter 123456.');
+    }
+
+    const demoProfile: UserProfile = {
       id: `usr-${Date.now()}`,
-      full_name: data.full_name,
-      wing: data.wing,
-      flat_number: data.flat_number,
+      full_name: signUpData.full_name.trim(),
+      wing: signUpData.wing,
+      flat_number: signUpData.flat_number.trim(),
       phone: formattedPhone,
-      email: data.email,
+      email: email.trim().toLowerCase(),
       role: 'resident',
-      bio: `Resident of ${data.wing}, Flat ${data.flat_number}`,
+      resident_type: signUpData.resident_type || 'owner',
+      verification_status: 'approved',
+      bio: `Resident of ${signUpData.wing}, Flat ${signUpData.flat_number.trim()}`,
       avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
       created_at: new Date().toISOString(),
     };
-    await this.persistSession(newProfile);
-    return newProfile;
+
+    await this.persistSession(demoProfile);
+    return demoProfile;
+  },
+
+  /**
+   * Resend 6-Digit Email OTP for Sign Up
+   */
+  async resendSignUpOtp(email: string): Promise<void> {
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim().toLowerCase(),
+      });
+      if (error) throw new Error(error.message);
+      return;
+    }
+  },
+
+  /**
+   * Reset Password for Email
+   */
+  async resetPasswordForEmail(email: string): Promise<void> {
+    if (isSupabaseConfigured) {
+      const redirectTo = AuthSession.makeRedirectUri({
+        scheme: 'ashtavinayak',
+        path: 'auth/callback',
+      });
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo,
+      });
+      if (error) throw new Error(error.message);
+      return;
+    }
   },
 
   /**
@@ -210,16 +285,19 @@ export const authService = {
   },
 
   /**
-   * Google OAuth sign-in using WebBrowser & Deep-Link redirect (ashtavinayak://auth/callback)
+   * Google OAuth sign-in using WebBrowser & Deep-Link redirect (AuthSession.makeRedirectUri)
    */
-  async signInWithGoogle(): Promise<{ user: UserProfile; isNewOrIncomplete: boolean }> {
+  async signInWithGoogle(): Promise<{ user: UserProfile; isNewOrIncomplete: boolean; resultUrl?: string }> {
     if (isSupabaseConfigured) {
-      const redirectUrl = 'ashtavinayak://auth/callback';
+      const redirectTo = AuthSession.makeRedirectUri({
+        scheme: 'ashtavinayak',
+        path: 'auth/callback',
+      });
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectUrl,
+          redirectTo,
           skipBrowserRedirect: true,
         },
       });
@@ -227,7 +305,7 @@ export const authService = {
       if (error) throw new Error(error.message);
       if (!data?.url) throw new Error('No authorization URL returned from Supabase OAuth.');
 
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
 
       if (result.type !== 'success' || !result.url) {
         throw new Error('Google Sign-In was cancelled or failed.');
@@ -238,8 +316,9 @@ export const authService = {
       if (url.includes('code=')) {
         const parsed = Linking.parse(url);
         const code = parsed.queryParams?.code;
-        if (typeof code === 'string') {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        const codeStr = Array.isArray(code) ? code[0] : code;
+        if (typeof codeStr === 'string' && codeStr.length > 0) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(codeStr);
           if (exchangeError) throw new Error(exchangeError.message);
         }
       } else if (url.includes('access_token=') || url.includes('#')) {
@@ -264,35 +343,45 @@ export const authService = {
 
       const authUser = userData.user;
 
-      // Check whether profile already has wing & flat number filled
+      // Check whether profile already has ALL 4 mandatory fields: full_name, phone, wing, flat_number
       const { data: existingProfile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', authUser.id)
         .single();
 
-      if (existingProfile && existingProfile.wing && existingProfile.flat_number) {
+      const hasAllFields = Boolean(
+        existingProfile &&
+        existingProfile.full_name && existingProfile.full_name.trim().length > 0 &&
+        existingProfile.phone && existingProfile.phone.trim().length > 0 &&
+        existingProfile.wing && existingProfile.wing.trim().length > 0 &&
+        existingProfile.flat_number && existingProfile.flat_number.trim().length > 0
+      );
+
+      if (existingProfile && hasAllFields) {
         await this.persistSession(existingProfile);
-        return { user: existingProfile, isNewOrIncomplete: false };
+        return { user: existingProfile, isNewOrIncomplete: false, resultUrl: url };
       }
 
       // Profile is missing or incomplete - mark as incomplete so user is routed to onboarding
       const meta = authUser.user_metadata || {};
       const partialProfile: UserProfile = {
         id: authUser.id,
-        full_name: existingProfile?.full_name || meta.full_name || meta.name || authUser.email?.split('@')[0] || 'Resident',
+        full_name: existingProfile?.full_name || meta.full_name || meta.name || authUser.email?.split('@')[0] || '',
         wing: existingProfile?.wing || 'Wing B',
         flat_number: existingProfile?.flat_number || '',
         phone: existingProfile?.phone || authUser.phone || '',
         email: authUser.email || existingProfile?.email || '',
         role: existingProfile?.role || 'resident',
+        resident_type: existingProfile?.resident_type || 'owner',
+        verification_status: existingProfile?.verification_status || 'approved',
         bio: existingProfile?.bio || 'Resident of Ashtavinayak Empire',
         avatar_url: existingProfile?.avatar_url || meta.avatar_url || meta.picture || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         created_at: existingProfile?.created_at || new Date().toISOString(),
       };
 
       await this.persistSession(partialProfile);
-      return { user: partialProfile, isNewOrIncomplete: true };
+      return { user: partialProfile, isNewOrIncomplete: true, resultUrl: url };
     }
 
     // Demo fallback when isSupabaseConfigured is false
@@ -451,25 +540,46 @@ export const authService = {
   },
 
   /**
-   * Complete flat details for onboarding (e.g. after Google OAuth or first phone sign-in)
+   * Complete flat details for onboarding (e.g. after Google OAuth)
    */
   async completeProfile(data: {
     full_name: string;
     wing: WingCode;
     flat_number: string;
     phone: string;
+    resident_type?: ResidentType;
     email?: string;
   }): Promise<UserProfile> {
-    const current = activeUser || (await this.getStoredSession());
-    if (!current) throw new Error('No active authenticated user.');
+    let authUser = activeUser;
+    if (!authUser && isSupabaseConfigured) {
+      const { data: u } = await supabase.auth.getUser();
+      if (u?.user) {
+        authUser = {
+          id: u.user.id,
+          full_name: data.full_name,
+          wing: data.wing,
+          flat_number: data.flat_number,
+          phone: data.phone,
+          email: u.user.email || data.email || '',
+          role: 'resident',
+          resident_type: data.resident_type || 'owner',
+          verification_status: 'approved',
+          created_at: new Date().toISOString(),
+        };
+      }
+    }
+    const current = authUser || (await this.getStoredSession()) || CURRENT_USER;
 
     const formattedPhone = formatIndianPhone(data.phone);
     const updated: UserProfile = {
       ...current,
+      id: current.id || (await supabase.auth.getUser()).data.user?.id || `usr-${Date.now()}`,
       full_name: data.full_name.trim(),
       wing: data.wing,
       flat_number: data.flat_number.trim(),
       phone: formattedPhone,
+      resident_type: data.resident_type || current.resident_type || 'owner',
+      verification_status: 'approved',
       email: data.email?.trim() || current.email,
       bio: `Resident of ${data.wing}, Flat ${data.flat_number.trim()}`,
     };
@@ -501,6 +611,8 @@ export const authService = {
     let finalUpdates = { ...updates };
     if (updates.avatar_url && !updates.avatar_url.startsWith('http')) {
       finalUpdates.avatar_url = await uploadMediaToR2(updates.avatar_url, 'avatars', 'image/jpeg');
+    } else if (updates.avatar_url === '') {
+      finalUpdates.avatar_url = null as any;
     }
     const updated = { ...activeUser, ...finalUpdates };
     activeUser = updated;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -28,9 +28,11 @@ import { ShimmerTitle } from '@/components/ShimmerTitle';
 import { useAuth } from '@/context/AuthContext';
 import { island } from '@/context/IslandContext';
 import { useTheme } from '@/context/ThemeContext';
-import { WingCode } from '@/types';
-import { isSupabaseConfigured } from '@/services/supabase';
+import { WingCode, ResidentType } from '@/types';
+import { supabase, isSupabaseConfigured } from '@/services/supabase';
+import { SignUpData } from '@/services/auth';
 import * as Haptics from 'expo-haptics';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -55,25 +57,28 @@ export default function LoginScreen() {
   const { tokens, isDark } = useTheme();
   const {
     signInWithEmail,
-    signInWithPhone,
+    signUpWithEmail,
     signInWithGoogle,
-    requestRegistrationOtp,
-    requestPhoneOtp,
+    resetPasswordForEmail,
   } = useAuth();
 
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
-  const [signInMethod, setSignInMethod] = useState<'email' | 'phone'>('email');
 
   // Sign In state
-  const [signInEmail, setSignInEmail] = useState('mayur.patil@ashtavinayak.org');
-  const [signInPhone, setSignInPhone] = useState('9876543210');
-  const [signInPassword, setSignInPassword] = useState('password123');
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
   const [rememberDevice, setRememberDevice] = useState(true);
+
+  // Forgot Password state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
 
   // Sign Up state
   const [fullName, setFullName] = useState('');
   const [selectedWing, setSelectedWing] = useState<WingCode>('Wing B');
   const [flatNumber, setFlatNumber] = useState('');
+  const [residentType, setResidentType] = useState<ResidentType>('owner');
   const [signUpPhone, setSignUpPhone] = useState('');
   const [signUpEmail, setSignUpEmail] = useState('');
   const [signUpPassword, setSignUpPassword] = useState('');
@@ -82,19 +87,62 @@ export default function LoginScreen() {
   const [showWingModal, setShowWingModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Listen for incoming OAuth deep link redirect on login screen (Expo Go or Standalone)
+  useEffect(() => {
+    const handleUrl = async (url: string) => {
+      if (!url || !isSupabaseConfigured) return;
+      if (url.includes('auth/callback') || url.includes('code=') || url.includes('access_token=')) {
+        try {
+          if (url.includes('code=')) {
+            const parsed = Linking.parse(url);
+            const code = parsed.queryParams?.code;
+            const codeStr = Array.isArray(code) ? code[0] : code;
+            if (typeof codeStr === 'string' && codeStr.length > 0) {
+              await supabase.auth.exchangeCodeForSession(codeStr);
+            }
+          } else if (url.includes('access_token=') || url.includes('#')) {
+            const hash = url.split('#')[1] || url.split('?')[1] || '';
+            const params = new URLSearchParams(hash);
+            const access_token = params.get('access_token');
+            const refresh_token = params.get('refresh_token');
+            if (access_token && refresh_token) {
+              await supabase.auth.setSession({ access_token, refresh_token });
+            }
+          }
+
+          const { data } = await supabase.auth.getUser();
+          if (data?.user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', data.user.id)
+              .single();
+            if (profile && profile.wing && profile.flat_number) {
+              router.replace('/(tabs)/feed');
+            } else {
+              router.replace('/(auth)/complete-profile');
+            }
+          }
+        } catch (e) {
+          console.warn('[LoginScreen] OAuth deep link handle error:', e);
+        }
+      }
+    };
+
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    Linking.getInitialURL().then((url) => {
+      if (url) handleUrl(url);
+    });
+
+    return () => sub.remove();
+  }, [router]);
+
   const handleSignIn = async () => {
     if (submitting) return;
 
-    if (signInMethod === 'email') {
-      if (!signInEmail || !signInEmail.includes('@')) {
-        island.error('Validation Error', 'Please enter a valid email address.');
-        return;
-      }
-    } else {
-      if (!signInPhone || signInPhone.length < 10) {
-        island.error('Validation Error', 'Please enter a valid 10-digit phone number.');
-        return;
-      }
+    if (!signInEmail || !signInEmail.includes('@')) {
+      island.error('Validation Error', 'Please enter a valid email address.');
+      return;
     }
 
     if (!signInPassword) {
@@ -104,38 +152,8 @@ export default function LoginScreen() {
 
     try {
       setSubmitting(true);
-      if (signInMethod === 'email') {
-        if (!signInPassword) {
-          island.error('Validation Error', 'Please enter your password.');
-          return;
-        }
-        await signInWithEmail(signInEmail, signInPassword, rememberDevice);
-        router.replace('/(tabs)/feed');
-      } else {
-        const cleanPhone = signInPhone.replace(/[^0-9]/g, '');
-        if (cleanPhone.length !== 10) {
-          island.error('Validation Error', 'Please enter a valid 10-digit Indian mobile number.');
-          return;
-        }
-        if (isSupabaseConfigured) {
-          await requestPhoneOtp(cleanPhone);
-          router.push({
-            pathname: '/(auth)/otp',
-            params: { targetPhone: cleanPhone },
-          });
-        } else {
-          if (signInPassword) {
-            await signInWithPhone(cleanPhone, signInPassword, rememberDevice);
-            router.replace('/(tabs)/feed');
-          } else {
-            await requestPhoneOtp(cleanPhone);
-            router.push({
-              pathname: '/(auth)/otp',
-              params: { targetPhone: cleanPhone },
-            });
-          }
-        }
-      }
+      await signInWithEmail(signInEmail, signInPassword, rememberDevice);
+      router.replace('/(tabs)/feed');
     } catch {
       // toast shown in context
     } finally {
@@ -143,11 +161,50 @@ export default function LoginScreen() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (forgotSubmitting) return;
+    if (!forgotEmail || !forgotEmail.includes('@')) {
+      island.error('Validation Error', 'Please enter a valid email address.');
+      return;
+    }
+    try {
+      setForgotSubmitting(true);
+      await resetPasswordForEmail(forgotEmail);
+      setShowForgotModal(false);
+      setForgotEmail('');
+    } catch {
+      // toast shown in context
+    } finally {
+      setForgotSubmitting(false);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     if (submitting) return;
     try {
       setSubmitting(true);
-      const { isNewOrIncomplete } = await signInWithGoogle();
+      const { isNewOrIncomplete, resultUrl } = await signInWithGoogle();
+
+      // Ensure both PKCE (?code=) and hash tokens (#access_token=) are handled if resultUrl is returned
+      if (resultUrl && isSupabaseConfigured) {
+        if (resultUrl.includes('code=')) {
+          const parsed = Linking.parse(resultUrl);
+          const code = parsed.queryParams?.code;
+          const codeStr = Array.isArray(code) ? code[0] : code;
+          if (typeof codeStr === 'string' && codeStr.length > 0) {
+            await supabase.auth.exchangeCodeForSession(codeStr);
+          }
+        } else if (resultUrl.includes('access_token=') || resultUrl.includes('#')) {
+          const hash = resultUrl.split('#')[1] || resultUrl.split('?')[1] || '';
+          const params = new URLSearchParams(hash);
+          const access_token = params.get('access_token');
+          const refresh_token = params.get('refresh_token');
+          if (access_token && refresh_token) {
+            await supabase.auth.setSession({ access_token, refresh_token });
+          }
+        }
+      }
+
       if (isNewOrIncomplete) {
         router.replace('/(auth)/complete-profile');
       } else {
@@ -191,25 +248,31 @@ export default function LoginScreen() {
 
     try {
       setSubmitting(true);
-      const signUpData = {
+      const signUpData: SignUpData = {
         full_name: fullName.trim(),
         wing: selectedWing,
         flat_number: flatNumber.trim(),
         phone: cleanPhone,
-        email: signUpEmail.trim(),
+        email: signUpEmail.trim().toLowerCase(),
         password: signUpPassword,
+        resident_type: residentType,
       };
 
-      await requestRegistrationOtp(signUpData);
+      await signUpWithEmail(signUpData, signUpPassword);
       router.push({
         pathname: '/(auth)/otp',
         params: {
           signUpData: JSON.stringify(signUpData),
-          targetPhone: cleanPhone,
+          targetEmail: signUpEmail.trim().toLowerCase(),
         },
       });
-    } catch {
-      // handled
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to create account.';
+      if (msg.includes('already exists') || msg.includes('already registered')) {
+        island.error('Account Already Exists', 'An account with this email already exists. Please Sign In instead.');
+      } else {
+        island.error('Registration Error', msg);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -301,37 +364,20 @@ export default function LoginScreen() {
           {/* ===================== SIGN IN VIEW ===================== */}
           {authMode === 'signin' ? (
             <View style={styles.formContainer}>
-              {signInMethod === 'email' ? (
-                <GlassInput
-                  label="Registered Email"
-                  placeholder="resident@ashtavinayak.org"
-                  value={signInEmail}
-                  onChangeText={setSignInEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  leftIcon={<Mail size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
-                />
-              ) : (
-                <GlassInput
-                  label="Registered Mobile Number"
-                  placeholder="98765 43210"
-                  value={signInPhone}
-                  onChangeText={setSignInPhone}
-                  keyboardType="phone-pad"
-                  leftIcon={
-                    <View style={styles.countryCodeBadge}>
-                      <Text style={[styles.countryCodeText, { color: tokens.textSecondary }]}>
-                        +91
-                      </Text>
-                    </View>
-                  }
-                />
-              )}
+              <GlassInput
+                label="Registered Email"
+                placeholder=""
+                value={signInEmail}
+                onChangeText={setSignInEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                leftIcon={<Mail size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
+              />
 
               {/* Password */}
               <GlassInput
                 label="Password"
-                placeholder="••••••••"
+                placeholder=""
                 value={signInPassword}
                 onChangeText={setSignInPassword}
                 isPassword
@@ -359,14 +405,7 @@ export default function LoginScreen() {
                   </Text>
                 </View>
 
-                <TouchableOpacity
-                  onPress={() =>
-                    island.info(
-                      'Password Reset',
-                      'Please contact society admin Rajesh Sharma (Wing A-101) to reset your passkey.'
-                    )
-                  }
-                >
+                <TouchableOpacity onPress={() => setShowForgotModal(true)}>
                   <Text style={[styles.forgotText, { color: tokens.textSecondary }]}>
                     Forgot password?
                   </Text>
@@ -407,49 +446,23 @@ export default function LoginScreen() {
                 <View style={[styles.orDividerLine, { backgroundColor: tokens.borderSubtle }]} />
               </View>
 
-              {/* Secondary Sign-In Options (Google and Phone toggle) */}
-              <View style={styles.socialButtonsRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryMethodBtn,
-                    {
-                      backgroundColor: isDark ? '#161616' : '#FAFAFA',
-                      borderColor: tokens.borderSubtle,
-                    },
-                  ]}
-                  onPress={handleGoogleSignIn}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.googleGText}>G</Text>
-                  <Text style={[styles.secondaryMethodLabel, { color: tokens.textPrimary }]}>
-                    Google
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryMethodBtn,
-                    {
-                      backgroundColor: isDark ? '#161616' : '#FAFAFA',
-                      borderColor: tokens.borderSubtle,
-                    },
-                  ]}
-                  onPress={() => {
-                    if (Platform.OS !== 'web') Haptics.selectionAsync();
-                    setSignInMethod((prev) => (prev === 'phone' ? 'email' : 'phone'));
-                  }}
-                  activeOpacity={0.8}
-                >
-                  {signInMethod === 'phone' ? (
-                    <Mail size={16} strokeWidth={1.5} color={tokens.textPrimary} />
-                  ) : (
-                    <Phone size={16} strokeWidth={1.5} color={tokens.textPrimary} />
-                  )}
-                  <Text style={[styles.secondaryMethodLabel, { color: tokens.textPrimary }]}>
-                    {signInMethod === 'phone' ? 'Use Email' : 'Phone'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              {/* Secondary Sign-In Options (Google OAuth) */}
+              <TouchableOpacity
+                style={[
+                  styles.googleFullBtn,
+                  {
+                    backgroundColor: isDark ? '#161616' : '#FAFAFA',
+                    borderColor: tokens.borderSubtle,
+                  },
+                ]}
+                onPress={handleGoogleSignIn}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.googleGText}>G</Text>
+                <Text style={[styles.secondaryMethodLabel, { color: tokens.textPrimary, marginLeft: 10 }]}>
+                  Continue with Google
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : (
             /* ===================== SIGN UP (NEW RESIDENT) VIEW ===================== */
@@ -457,7 +470,7 @@ export default function LoginScreen() {
               {/* Full Name */}
               <GlassInput
                 label="Full Name"
-                placeholder="As on society records"
+                placeholder=""
                 value={fullName}
                 onChangeText={setFullName}
                 leftIcon={<User size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
@@ -491,7 +504,7 @@ export default function LoginScreen() {
                 <View style={[styles.colItem, { marginLeft: 8 }]}>
                   <GlassInput
                     label="Flat Number"
-                    placeholder="e.g. 402"
+                    placeholder=""
                     value={flatNumber}
                     onChangeText={setFlatNumber}
                     keyboardType="number-pad"
@@ -501,11 +514,69 @@ export default function LoginScreen() {
                 </View>
               </View>
 
+              {/* Resident Type: Owner vs Tenant */}
+              <View style={{ marginTop: 14 }}>
+                <Text style={[styles.inputLabel, { color: tokens.textSecondary, marginBottom: 8 }]}>
+                  Resident Type
+                </Text>
+                <View style={styles.residentTypeRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.residentTypeBtn,
+                      residentType === 'owner' && {
+                        backgroundColor: isDark ? '#FFFFFF' : '#111111',
+                        borderColor: isDark ? '#FFFFFF' : '#111111',
+                      },
+                      residentType !== 'owner' && {
+                        backgroundColor: isDark ? '#141414' : '#F4F4F5',
+                        borderColor: tokens.borderSubtle,
+                      },
+                    ]}
+                    onPress={() => setResidentType('owner')}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.residentTypeBtnText,
+                        { color: residentType === 'owner' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textSecondary },
+                      ]}
+                    >
+                      Owner
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.residentTypeBtn,
+                      residentType === 'tenant' && {
+                        backgroundColor: isDark ? '#FFFFFF' : '#111111',
+                        borderColor: isDark ? '#FFFFFF' : '#111111',
+                      },
+                      residentType !== 'tenant' && {
+                        backgroundColor: isDark ? '#141414' : '#F4F4F5',
+                        borderColor: tokens.borderSubtle,
+                      },
+                    ]}
+                    onPress={() => setResidentType('tenant')}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.residentTypeBtnText,
+                        { color: residentType === 'tenant' ? (isDark ? '#000000' : '#FFFFFF') : tokens.textSecondary },
+                      ]}
+                    >
+                      Tenant
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               {/* Mobile Number with +91 prefix */}
               <View style={{ marginTop: 14 }}>
                 <GlassInput
-                  label="Mobile Number (for verification code)"
-                  placeholder="98765 43210"
+                  label="Mobile Number (for society records)"
+                  placeholder=""
                   value={signUpPhone}
                   onChangeText={setSignUpPhone}
                   keyboardType="phone-pad"
@@ -522,8 +593,8 @@ export default function LoginScreen() {
 
               {/* Email Address */}
               <GlassInput
-                label="Email Address"
-                placeholder="name@example.com"
+                label="Email Address (for 6-digit confirmation code)"
+                placeholder=""
                 value={signUpEmail}
                 onChangeText={setSignUpEmail}
                 keyboardType="email-address"
@@ -534,7 +605,7 @@ export default function LoginScreen() {
               {/* Create Password */}
               <GlassInput
                 label="Create Password (min. 8 characters)"
-                placeholder="••••••••"
+                placeholder=""
                 value={signUpPassword}
                 onChangeText={setSignUpPassword}
                 isPassword
@@ -677,6 +748,92 @@ export default function LoginScreen() {
           </View>
         </Modal>
       )}
+
+      {/* Forgot Password Modal */}
+      {showForgotModal && (
+        <Modal
+          visible={true}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowForgotModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View
+              style={[
+                styles.modalContent,
+                {
+                  backgroundColor: isDark ? '#141414' : '#FFFFFF',
+                  borderColor: tokens.borderSubtle,
+                },
+              ]}
+            >
+              <Text style={[styles.modalTitle, { color: tokens.textPrimary }]}>
+                Reset Password
+              </Text>
+              <Text
+                style={{
+                  fontSize: 12,
+                  color: tokens.textSecondary,
+                  textAlign: 'center',
+                  marginBottom: 16,
+                  lineHeight: 18,
+                }}
+              >
+                Enter your registered society email. We will send you instructions to reset your password.
+              </Text>
+
+              <GlassInput
+                label="Registered Email"
+                placeholder=""
+                value={forgotEmail}
+                onChangeText={setForgotEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                leftIcon={<Mail size={16} strokeWidth={1.5} color={tokens.textSecondary} />}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryMethodBtn,
+                    {
+                      backgroundColor: isDark ? '#1C1C1C' : '#F4F4F5',
+                      borderColor: tokens.borderSubtle,
+                    },
+                  ]}
+                  onPress={() => setShowForgotModal(false)}
+                  disabled={forgotSubmitting}
+                >
+                  <Text style={{ color: tokens.textSecondary, fontWeight: '500' }}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryCta,
+                    {
+                      flex: 1,
+                      marginTop: 0,
+                      backgroundColor: isDark ? '#F5F5F5' : '#111111',
+                    },
+                  ]}
+                  onPress={handleForgotPassword}
+                  disabled={forgotSubmitting}
+                >
+                  <Text
+                    style={{
+                      color: isDark ? '#000000' : '#FFFFFF',
+                      fontWeight: '600',
+                      fontSize: 13,
+                    }}
+                  >
+                    {forgotSubmitting ? 'Sending...' : 'Send Reset Link'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -784,6 +941,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 4,
+  },
+  googleFullBtn: {
+    width: '100%',
+    height: 46,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  residentTypeRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  residentTypeBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  residentTypeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   secondaryMethodBtn: {
     flex: 1,

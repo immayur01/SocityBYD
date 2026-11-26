@@ -62,6 +62,7 @@ export const UnifiedComposerStep: React.FC<UnifiedComposerStepProps> = ({
   const [audience, setAudience] = useState<AudienceSelection>({ type: 'All Residents' });
   const [showAudienceSheet, setShowAudienceSheet] = useState(false);
   const [allowComments, setAllowComments] = useState(true);
+  const [durationHours, setDurationHours] = useState<24 | 48>(48);
 
   // Event Mode Specific
   const [eventTitle, setEventTitle] = useState('');
@@ -190,6 +191,7 @@ export const UnifiedComposerStep: React.FC<UnifiedComposerStepProps> = ({
       noticePriority,
       noticeMessage,
       pinDuration,
+      durationHours,
     };
 
     onSubmit(payload);
@@ -334,6 +336,49 @@ export const UnifiedComposerStep: React.FC<UnifiedComposerStepProps> = ({
                   <ChevronRight size={15} strokeWidth={1.5} color="#71717A" />
                 </View>
               </TouchableOpacity>
+
+              <View style={styles.hairline} />
+
+              {/* Duration Selector Row */}
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Post Duration</Text>
+                <View style={styles.durationSelector}>
+                  <TouchableOpacity
+                    style={[
+                      styles.durationPill,
+                      durationHours === 24 && styles.durationPillActive,
+                    ]}
+                    onPress={() => setDurationHours(24)}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.durationPillText,
+                        durationHours === 24 && styles.durationPillTextActive,
+                      ]}
+                    >
+                      24 Hours
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.durationPill,
+                      durationHours === 48 && styles.durationPillActive,
+                    ]}
+                    onPress={() => setDurationHours(48)}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.durationPillText,
+                        durationHours === 48 && styles.durationPillTextActive,
+                      ]}
+                    >
+                      48 Hours
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               <View style={styles.hairline} />
 
@@ -897,6 +942,32 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     marginHorizontal: 16,
+  },
+  durationSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1C1C1E',
+    borderRadius: 8,
+    padding: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  durationPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  durationPillActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  durationPillText: {
+    color: '#A1A1AA',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  durationPillTextActive: {
+    color: '#000000',
+    fontWeight: '600',
   },
   pinLabelWrap: {
     flexDirection: 'row',

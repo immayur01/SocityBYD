@@ -2,9 +2,10 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, Moon, Sun, User } from 'lucide-react-native';
+import { Plus, Moon, Sun } from 'lucide-react-native';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { ResidentAvatar } from '@/components/ResidentAvatar';
 import * as Haptics from 'expo-haptics';
 
 interface TopHeaderProps {
@@ -148,29 +149,13 @@ export function TopHeader({
             </Text>
           </View>
 
-          {/* Nested rounded-square user avatar — neutral surface with subtle hairline */}
-          <View
-            style={[
-              styles.avatarBox,
-              isDark
-                ? {
-                    backgroundColor: '#1C1C1E',
-                    borderColor: 'rgba(255, 255, 255, 0.08)',
-                    borderWidth: 1,
-                  }
-                : {
-                    backgroundColor: '#E4E4E7',
-                    borderColor: 'rgba(0, 0, 0, 0.08)',
-                    borderWidth: 1,
-                  },
-            ]}
-          >
-            <User
-              size={15}
-              color={isDark ? '#E4E4E7' : '#111113'}
-              strokeWidth={1.5}
-            />
-          </View>
+          {/* Nested rounded-square user avatar with dynamic photo/initials */}
+          <ResidentAvatar
+            name={user?.full_name || displayName}
+            avatarUrl={user?.avatar_url}
+            size={28}
+            borderRadius={7}
+          />
         </TouchableOpacity>
       </View>
     </View>
